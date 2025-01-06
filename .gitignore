@@ -1,0 +1,31 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment folders
+.venv/
+venv/
+env/
+venv.bak/
+
+# macOS, Windows, and Linux system files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Streamlit cache files
+.streamlit/
+*/.streamlit/
+
+# Jupyter notebook checkpoints (if any)
+.ipynb_checkpoints/
+
+# Logs and temp files
+*.log
+*.tmp
+*.temp
+
+# Ignore data files if you don't want them in the repo
+data/
