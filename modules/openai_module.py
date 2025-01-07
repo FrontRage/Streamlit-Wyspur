@@ -11,7 +11,7 @@ openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 def generate_text_basic(
     prompt: str, 
     model: str, 
-    temperature: float = 0.0, 
+    temperature: float = 0.5, 
     top_p: float = 1.0,
 ) -> str:
     """
@@ -32,13 +32,13 @@ def generate_text_basic(
     )
     return response.choices[0].message.content
 
-def generate_text_with_conversation(messages, model="gpt-3.5-turbo") -> str:
+def generate_text_with_conversation(messages, model="gpt-4o-mini") -> str:
     """
     Uses the same chat.completions.create endpoint but allows passing
     a list of 'messages' for multi-turn conversations.
     
     :param messages: List of message dicts, e.g. [{"role": "user", "content": "Hi"}]
-    :param model: The model ID (default: "gpt-3.5-turbo").
+    :param model: The model ID (default: "gpt-4o-mini").
     :return: The assistant's message content as a string.
     """
     response = openai_client.chat.completions.create(

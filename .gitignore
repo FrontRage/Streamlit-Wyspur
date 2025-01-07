@@ -8,7 +8,7 @@ __pycache__/
 venv/
 env/
 venv.bak/
-
+.env
 # macOS, Windows, and Linux system files
 .DS_Store
 Thumbs.db
