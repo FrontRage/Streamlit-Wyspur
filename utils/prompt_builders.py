@@ -7,11 +7,11 @@ def build_user_instructions(column_keywords_dict: dict) -> str:
         return "No special exclude instructions provided."
 
     instructions = (
-        "Column matching logic (AND condition):Exclude a row only if it meets all the user’s exclude conditions across the specified columns. If any column does not match, keep the row."
+        "Column matching logic (AND condition):Exclude a row only if it meets all the user’s exclude conditions across the specified columns. If any column does not match, keep the row.\n"
     )
 
     for col, keywords in column_keywords_dict.items():
-        instructions += f"- Column '{col}': exclude if it broadly matches based on previous instructions any of ({', '.join(keywords)})\n"
+        instructions += f"- Column '{col}': exclude if it matches any of ({', '.join(keywords)})\n"
     return instructions
 
 
@@ -53,9 +53,9 @@ def build_conceptual_text(slider_value: int) -> str:
         return """
         Broad matching (Level 5/5):
         - Consider synonyms, abbreviations, and variations. If the user excludes “CEO,” also exclude “Chief Executive Officer,” “C.E.O.,” “CEOs,” etc. If the user excludes “VP,” also exclude “Vice President,” “V.P.,” “Senior VP,” etc.
-        - If a concept like “politics” is excluded, also exclude anything about government agencies, elections, lobbying, etc.
+        - For employee counts columns, you might be given ranges, as an example if the filter is 50+, ranges like "51_200" or "1001_5000" would qualify as 50+ employees and be excluded.
         - For location-based exclusions: if “USA” or “US” is excluded, exclude rows mentioning “United States,” “New York,” “Los Angeles,” etc. If “Germany” is excluded, exclude rows mentioning “Berlin,” “Munich,” etc.
-        - If uncertain, exclude. For partial-word ambiguity (e.g., “CEO” vs. “oceans”), exclude if in doubt.
+        - For partial-word ambiguity (e.g., “CEO” vs. “oceans”), keep unless you can reason that they are related within the context of the column tittle.
         """
     else:
         # LEVELS 2, 3, AND 4: MODERATE EXCLUSIONS
@@ -102,8 +102,6 @@ def build_llm_prompt(
     system_instructions = f"""
     You are an expert data-cleaning assistant. Decide whether to KEEP or EXCLUDE each row based on the user’s instructions. Follow these rules:
 
-    {reasoning_text}
-
     IMPORTANT:
     - Do not include any row index larger than {max_idx} or smaller than {min_idx}.
     - Do not include row indices that are not listed in the summaries.
@@ -136,8 +134,9 @@ def build_llm_prompt(
 
     {format_instructions}
 
-    [User Instructions]
     {user_instructions_text}
+
+    {reasoning_text}
 
     [Row Summaries]
     {chr(10).join(row_summaries)}
