@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-# Import modules for tools
+# Imports from your modules:
 from modules.filter_logic import filter_df_via_llm_summaries
 from modules.fuzzy_logic import python_pre_filter_fuzzy
 from utils.prompt_builders import build_user_instructions, build_conceptual_text
@@ -9,70 +9,8 @@ from utils.prompt_builders import build_user_instructions, build_conceptual_text
 # Define models and descriptions for dropdown
 from config import MODEL_OPTIONS, DEFAULT_MODEL
 
-# Define credentials
-USERNAME = "testuser123"
-PASSWORD = "testpassword123"
-
-
-def authenticate(username, password):
-    return username == USERNAME and password == PASSWORD
-
-
-def login_page():
-    """
-    Display a simple centered login page with a logo and credentials input.
-    """
-    # Set the page layout to wide and center elements
-    st.set_page_config(layout="centered")
-
-    # Placeholder for the login page content
-    placeholder = st.empty()
-
-    # Display login content inside the placeholder
-    with placeholder.container():
-        # Display the logo
-        st.image("wyspur.png", width=200)
-
-        # Login form
-        st.title("Login")
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        login_button = st.button("Login")
-        
-        if login_button:
-            if authenticate(username, password):
-                st.session_state.authenticated = True
-            else:
-                st.error("Invalid username or password")
-
-
-def calculator_tool():
-    """
-    Calculator tool UI logic.
-    """
-    st.header("Calculator")
-
-    num1 = st.number_input("Enter first number", value=0.0, format="%.2f", key="num1_input")
-    num2 = st.number_input("Enter second number", value=0.0, format="%.2f", key="num2_input")
-    operation = st.selectbox("Select operation", ["Add", "Subtract", "Multiply", "Divide"], key="operation_selectbox")
-
-    if operation == "Add":
-        result = num1 + num2
-    elif operation == "Subtract":
-        result = num1 - num2
-    elif operation == "Multiply":
-        result = num1 * num2
-    elif operation == "Divide":
-        result = num1 / num2 if num2 != 0 else "Error: Division by zero"
-
-    st.write(f"Result: {result}")
-
-
-def filter_tool():
-    """
-    Filter tool UI logic.
-    """
-    st.header("Wyspur AI Conceptual CSV Filter")
+def main():
+    st.title("Wyspur AI Conceptual CSV Filter")
 
     # 1) File upload
     uploaded_file = st.file_uploader("Upload a CSV file to filter", type=["csv"])
@@ -125,22 +63,13 @@ def filter_tool():
     # Show a warning if "o1" or "o1-mini" is selected
     if selected_model in ["o1", "o1-mini"]:
         st.warning(
-            "\u26A0\uFE0F You've selected an expensive model! Consider using 'GPT-4o-mini' for affordability."
+            "⚠️ You've selected an expensive model! Consider using 'GPT-4o-mini' for affordability."
         )
 
     # Optional: Debug mode
     debug_mode = st.checkbox("Show LLM debugging info?", value=True)
 
-    # 5) Temperature slider
-    temperature = st.slider(
-        "Temperature (0=deterministic, 1=creative)",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.5,
-        step=0.1
-    )
-
-    # 6) Fuzzy pre-filter option
+    # 5) Fuzzy pre-filter option
     apply_fuzzy = st.checkbox("Apply Python-based Fuzzy Pre-Filter?", value=True)
     if apply_fuzzy and column_keywords:
         st.info("Using fuzzy pre-filter with threshold=85 to remove obvious matches before LLM filtering.")
@@ -150,10 +79,10 @@ def filter_tool():
     else:
         df_for_filtering = df
 
-    # 7) Build user instructions for LLM
+    # 6) Build user instructions for LLM
     user_instructions = build_user_instructions(column_keywords)
 
-    # 8) Filter via LLM
+    # 7) Filter via LLM
     if st.button("Filter CSV with LLM"):
         st.write("Filtering in progress...")
 
@@ -165,7 +94,6 @@ def filter_tool():
             conceptual_slider=conceptual_slider,  # Pass the slider value
             reasoning_text=conceptual_instructions,  # Provide conceptual text
             model=selected_model,           # Pass the selected model
-            temperature=temperature,        # Pass the temperature value
             debug=debug_mode
         )
 
@@ -176,7 +104,7 @@ def filter_tool():
         st.write("Preview of filtered data:")
         st.dataframe(filtered_df.head(50))
 
-        # 9) Allow user to download the filtered CSV
+        # 8) Allow user to download the filtered CSV
         csv_data = filtered_df.to_csv(index=False)
         st.download_button(
             label="Download Filtered CSV",
@@ -184,44 +112,6 @@ def filter_tool():
             file_name="filtered_output.csv",
             mime="text/csv"
         )
-
-
-def main():
-    """
-    Main function to display the login page or authenticated content.
-    """
-    if "authenticated" not in st.session_state:
-        st.session_state.authenticated = False
-
-    if not st.session_state.authenticated:
-        login_page()
-    else:
-        # Sidebar configuration with company logo
-        with st.sidebar:
-            st.image("wyspur.png", use_container_width=True)
-            st.title("Wyspur AI Tools")
-
-            # Initialize session states
-            if "show_filter_tool" not in st.session_state:
-                st.session_state.show_filter_tool = True  # Default to showing filter tool
-            if "show_calculator_tool" not in st.session_state:
-                st.session_state.show_calculator_tool = False
-
-            # Sidebar buttons for navigation
-            if st.button("AI Filter Tool"):
-                st.session_state.show_filter_tool = True
-                st.session_state.show_calculator_tool = False
-
-            if st.button("Calculator"):
-                st.session_state.show_filter_tool = False
-                st.session_state.show_calculator_tool = True
-
-        # Main content area
-        if st.session_state.show_filter_tool:
-            filter_tool()
-        elif st.session_state.show_calculator_tool:
-            calculator_tool()
-
 
 if __name__ == "__main__":
     main()
