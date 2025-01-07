@@ -35,15 +35,21 @@ def login_page():
 
         # Login form
         st.title("Login")
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
+        username = st.text_input("Username", key="login_username")
+        password = st.text_input("Password", type="password", key="login_password")
         login_button = st.button("Login")
-        
+
+        # Authenticate user
         if login_button:
             if authenticate(username, password):
                 st.session_state.authenticated = True
+                st.session_state.auth_failed = False
             else:
-                st.error("Invalid username or password")
+                st.session_state.auth_failed = True
+
+        # Show error message if login failed
+        if st.session_state.get("auth_failed"):
+            st.error("Invalid username or password")
 
 
 def calculator_tool():
