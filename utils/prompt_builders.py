@@ -67,7 +67,7 @@ def build_conceptual_text(slider_value: int) -> str:
             - Example: If “CEO” is excluded, also exclude “Chief Executive Officer,”
               “C.E.O.,” or “CEOs” (plural).
             - Example: If “VP” is excluded, also exclude “Vice President,”
-              “V.P.,” or variations of that title.
+              “V.P.,” or variations of that title including Senior positions like "SVP"
         • Treat minor variations, rewordings, or partial matches as relevant if they
           are closely related (e.g., “lobbying” for “politics”).
         • Location-based exclusions:
