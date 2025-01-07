@@ -1,11 +1,12 @@
 import pandas as pd
 from thefuzz import fuzz
+from typing import Tuple, Dict, List
 
 def python_pre_filter_fuzzy(
     df: pd.DataFrame,
-    column_keywords: dict,
+    column_keywords: Dict[str, List[str]],
     threshold: int = 85
-) -> (pd.DataFrame, list):
+) -> Tuple[pd.DataFrame, List[Tuple[int, str, str, str, int]]]:
     """
     Exclude rows if the cell in ANY relevant column is a fuzzy match
     (ratio >= threshold) to ANY of the keywords.
