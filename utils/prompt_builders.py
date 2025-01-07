@@ -82,6 +82,9 @@ def build_conceptual_text(slider_value: int) -> str:
         • Partial word overlaps: be mindful of words like “CEOs” (valid) vs. “oceans”
           (not valid). However, if the partial overlap is ambiguous, assume it is
           related and exclude.
+        • Company_employeeCountRange column is a range, so make sure the provided number
+          is within that range for exclusion. example "50+" fits under the "50_100" range, 
+          or the "1000_5000" range as both ranges have 50+ employees in them.
         """
     else:
         # LEVELS 2, 3, AND 4: MODERATE EXCLUSIONS
