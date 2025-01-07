@@ -10,8 +10,8 @@ from utils.prompt_builders import build_user_instructions, build_conceptual_text
 from config import MODEL_OPTIONS, DEFAULT_MODEL
 
 # Define credentials
-USERNAME = "testuser123"
-PASSWORD = "testpassword123"
+USERNAME = "test123"
+PASSWORD = "test123"
 
 
 def authenticate(username, password):
