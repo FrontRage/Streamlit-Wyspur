@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 
+# Set page configuration
+st.set_page_config(layout="centered")
+
 # Import modules for tools
 from modules.filter_logic import filter_df_via_llm_summaries
 from modules.fuzzy_logic import python_pre_filter_fuzzy
@@ -73,8 +76,6 @@ def login_page():
     """
     Display a simple centered login page with a logo and credentials input.
     """
-    st.set_page_config(layout="centered")
-
     placeholder = st.empty()
 
     with placeholder.container():
