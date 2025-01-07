@@ -98,7 +98,7 @@ def filter_tool():
 
     # 3) Conceptual reasoning slider & chunk size input
     conceptual_slider = st.slider(
-        "Conceptual Reasoning Strictness (1=Very Strict, 5=Very Broad)", 1, 5, 3
+        "Conceptual Reasoning Strictness (1=Very Strict, 5=Very Broad)", 1, 5, 5
     )
     st.write("---")
 
@@ -136,7 +136,7 @@ def filter_tool():
         "Temperature (0=deterministic, 1=creative)",
         min_value=0.0,
         max_value=1.0,
-        value=0.5,
+        value=1.0,
         step=0.1
     )
 

@@ -11,7 +11,7 @@ openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 def generate_text_basic(
     prompt: str, 
     model: str, 
-    temperature: float = 0.5, 
+    temperature: float = 1.0, 
     top_p: float = 1.0,
 ) -> str:
     """
