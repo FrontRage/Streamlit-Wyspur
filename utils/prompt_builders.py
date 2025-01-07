@@ -7,19 +7,11 @@ def build_user_instructions(column_keywords_dict: dict) -> str:
         return "No special exclude instructions provided."
 
     instructions = (
-        "Exclude a row if and ONLY IF it meets ALL of the following column-based criteria.\n"
-        "That means every selected column must match one of the user's exclude keywords.\n"
-        "If any column does not match, KEEP the row.\n\n"
-        "Here are the columns and their exclude keywords:\n"
+        "Column matching logic (AND condition):Exclude a row only if it meets all the user’s exclude conditions across the specified columns. If any column does not match, keep the row."
     )
 
     for col, keywords in column_keywords_dict.items():
-        instructions += f"- Column '{col}': exclude if it matches any of ({', '.join(keywords)})\n"
-
-    instructions += (
-        "\nRemember, it's an AND condition across columns: all must match for EXCLUDE.\n"
-        "If even one column doesn't match, keep the row.\n"
-    )
+        instructions += f"- Column '{col}': exclude if it broadly matches based on previous instructions any of ({', '.join(keywords)})\n"
     return instructions
 
 
@@ -59,29 +51,11 @@ def build_conceptual_text(slider_value: int) -> str:
     elif slider_value == 5:
         # LEVEL 5: VERY BROAD EXCLUSIONS
         return """
-        LEVEL 5/5: VERY BROAD
-
-        • Exclude rows if they even loosely or thematically align with the user’s
-          exclude concepts, including synonyms, tangential references, and spelled-out
-          or abbreviated forms.
-            - Example: If “CEO” is excluded, also exclude “Chief Executive Officer,”
-              “C.E.O.,” or “CEOs” (plural).
-            - Example: If “VP” is excluded, also exclude “Vice President,”
-              “V.P.,” or variations of that title including Senior positions like "SVP"
-        • Treat minor variations, rewordings, or partial matches as relevant if they
-          are closely related (e.g., “lobbying” for “politics”).
-        • Location-based exclusions:
-            - If a country is excluded (e.g., “USA,” “US,” “U.S.”), also exclude
-              rows that only list the city (e.g., “New York,” “Los Angeles,” etc.).
-            - If the user excludes “Germany,” exclude “Berlin,” “Munich,” or any
-              German region if identifiable as part of Germany.
-        • Err on the side of over-exclusion: if in doubt, exclude the row.
-        • Tangential or associated ideas count too: if the user excludes “politics,”
-          exclude anything about elections, government agencies, or
-          campaign contributions.
-        • Partial word overlaps: be mindful of words like “CEOs” (valid) vs. “oceans”
-          (not valid). However, if the partial overlap is ambiguous, assume it is
-          related and exclude.
+        Broad matching (Level 5/5):
+        - Consider synonyms, abbreviations, and variations. If the user excludes “CEO,” also exclude “Chief Executive Officer,” “C.E.O.,” “CEOs,” etc. If the user excludes “VP,” also exclude “Vice President,” “V.P.,” “Senior VP,” etc.
+        - If a concept like “politics” is excluded, also exclude anything about government agencies, elections, lobbying, etc.
+        - For location-based exclusions: if “USA” or “US” is excluded, exclude rows mentioning “United States,” “New York,” “Los Angeles,” etc. If “Germany” is excluded, exclude rows mentioning “Berlin,” “Munich,” etc.
+        - If uncertain, exclude. For partial-word ambiguity (e.g., “CEO” vs. “oceans”), exclude if in doubt.
         """
     else:
         # LEVELS 2, 3, AND 4: MODERATE EXCLUSIONS
@@ -126,11 +100,7 @@ def build_llm_prompt(
     """
     # Common system instructions
     system_instructions = f"""
-    You are an expert data-cleaning assistant.
-
-    The user wants to exclude a row ONLY if it meets ALL the specified
-    column-based exclude keywords (AND-logic). If even one column does not match,
-    you must KEEP the row.
+    You are an expert data-cleaning assistant. Decide whether to KEEP or EXCLUDE each row based on the user’s instructions. Follow these rules:
 
     {reasoning_text}
 
