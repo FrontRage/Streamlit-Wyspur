@@ -5,6 +5,8 @@ def build_user_instructions(column_keywords_dict: dict) -> str:
     """
     if not column_keywords_dict:
         return "No special exclude instructions provided."
+    
+    instructions = "Here are the columns and their exclude keywords:\n"
 
     for col, keywords in column_keywords_dict.items():
         instructions += f"- Column '{col}': exclude if it matches any of ({', '.join(keywords)})\n"
@@ -122,7 +124,7 @@ def build_llm_prompt(
 
     The user wants to exclude a row ONLY if it meets ALL the specified
     column-based keywords (AND-logic). If even one column does not match,
-    you must KEEP the row, unless the row that doesnt match doesnt have a value.
+    you must KEEP the row, unless the column that doesnt match doesnt have a value.
 
     IMPORTANT:
     - Do not include row indices that are not listed in the summaries.
@@ -159,11 +161,11 @@ def build_llm_prompt(
 
     {chr(10).join(row_summaries)}
 
-    This is the reasoning to exclude columns:
+    This is the reasoning you need to use to exclude columns based on the provided keywords:
     {reasoning_text}
 
     Now that you have read and understood how broad you need to reason to exclude rows
-    go back to the rows provided and 
+    based on the column provided keywords go back analyze them and
     {format_instructions}
     """
 
