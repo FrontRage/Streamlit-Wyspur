@@ -6,20 +6,9 @@ def build_user_instructions(column_keywords_dict: dict) -> str:
     if not column_keywords_dict:
         return "No special exclude instructions provided."
 
-    instructions = (
-        "Exclude a row if and ONLY IF it meets ALL of the following column-based criteria.\n"
-        "That means every selected column must match one of the user's exclude keywords.\n"
-        "If any column does not match, KEEP the row.\n\n"
-        "Here are the columns and their exclude keywords:\n"
-    )
-
     for col, keywords in column_keywords_dict.items():
         instructions += f"- Column '{col}': exclude if it matches any of ({', '.join(keywords)})\n"
 
-    instructions += (
-        "\nRemember, it's an AND condition across columns: all must match for EXCLUDE.\n"
-        "If even one column doesn't match, keep the row.\n"
-    )
     return instructions
 
 
@@ -62,9 +51,9 @@ def build_conceptual_text(slider_value: int) -> str:
         LEVEL 5/5: VERY BROAD
 
         • Exclude rows if they even loosely or thematically align with the user’s
-          exclude concepts, including synonyms, tangential references, and spelled-out
+          exclude concepts for each column, including synonyms, tangential references, and spelled-out
           or abbreviated forms.
-            - Example: If “CEO” is excluded, also exclude “Chief Executive Officer,”
+            - Example: If “CEO” is excluded in a column, also exclude “Chief Executive Officer,”
               “C.E.O.,” or “CEOs” (plural).
             - Example: If “VP” is excluded, also exclude “Vice President,”
               “V.P.,” or variations of that title including Senior positions like "SVP"
@@ -76,7 +65,7 @@ def build_conceptual_text(slider_value: int) -> str:
             - If the user excludes “Germany,” exclude “Berlin,” “Munich,” or any
               German region if identifiable as part of Germany.
         • Err on the side of over-exclusion: if in doubt, exclude the row.
-        • Tangential or associated ideas count too: if the user excludes “politics,”
+        • Tangential or associated ideas count too: if the user excludes “politics,” in an industry column,
           exclude anything about elections, government agencies, or
           campaign contributions.
         • Partial word overlaps: be mindful of words like “CEOs” (valid) vs. “oceans”
@@ -129,16 +118,13 @@ def build_llm_prompt(
     """
     # Common system instructions
     system_instructions = f"""
-    You are an expert data-cleaning assistant.
+    You are an expert data-cleaning assistant. You are going to be provided a Salesforce exported contact list.
 
     The user wants to exclude a row ONLY if it meets ALL the specified
-    column-based exclude keywords (AND-logic). If even one column does not match,
-    you must KEEP the row.
-
-    {reasoning_text}
+    column-based keywords (AND-logic). If even one column does not match,
+    you must KEEP the row, unless the row that doesnt match doesnt have a value.
 
     IMPORTANT:
-    - Do not include any row index larger than {max_idx} or smaller than {min_idx}.
     - Do not include row indices that are not listed in the summaries.
     """
 
@@ -151,7 +137,7 @@ def build_llm_prompt(
         Where:
         - RowIndex: integer
         - Decision: KEEP or EXCLUDE
-        - Reason: a short explanation referencing *each column* and 
+        - Reason: an explanation referencing *each column* and 
                   how it matched or did not match the user's exclude keywords.
         """
     else:
@@ -167,13 +153,18 @@ def build_llm_prompt(
     prompt_for_llm = f"""
     {system_instructions}
 
-    {format_instructions}
-
-    [User Instructions]
     {user_instructions_text}
 
-    [Row Summaries]
+    Rows to be analyzed:
+
     {chr(10).join(row_summaries)}
+
+    This is the reasoning to exclude columns:
+    {reasoning_text}
+
+    Now that you have read and understood how broad you need to reason to exclude rows
+    go back to the rows provided and 
+    {format_instructions}
     """
 
     return prompt_for_llm.strip()
