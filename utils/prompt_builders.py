@@ -50,34 +50,42 @@ def build_conceptual_text(slider_value: int) -> str:
     elif slider_value == 5:
         # LEVEL 5: VERY BROAD EXCLUSIONS
         return """
-        LEVEL 5/5: VERY BROAD
+Exclusion Criteria (Level 5/5: Very Broad)
 
-        • Exclude rows if they even loosely or thematically align with the user’s
-          exclude concepts for each column, including synonyms, tangential references, and spelled-out
-          or abbreviated forms.
-            - Example: If “CEO” is excluded in a column, also exclude “Chief Executive Officer,”
-              “C.E.O.,” or “CEOs” (plural).
-            - Example: If “VP” is excluded, also exclude “Vice President,”
-              “V.P.,” or variations of that title including Senior positions like "SVP"
-        • Treat minor variations, rewordings, or partial matches as relevant if they
-          are closely related (e.g., “lobbying” for “politics”).
-        • Location-based exclusions:
-            - If a country is excluded (e.g., “USA,” “US,” “U.S.”), also exclude
-              rows that only list the city (e.g., “New York,” “Los Angeles,” etc.).
-            - If the user excludes “Germany,” exclude “Berlin,” “Munich,” or any
-              German region if identifiable as part of Germany.
-        • Err on the side of over-exclusion: if in doubt, exclude the row.
-        • Tangential or associated ideas count too: if the user excludes “politics,” in an industry column,
-          exclude anything about elections, government agencies, or
-          campaign contributions.
-        • Partial word overlaps: be mindful of words like “CEOs” (valid) vs. “oceans”
-          (not valid). However, if the partial overlap is ambiguous, assume it is
-          related and exclude.
-        • Company_employeeCountRange column could be a range or just a number, so make sure the provided number
-          is within that range for exclusion. 
-          Example: key word provided by user "50 or more employees":
-          For ranges :"1000_5000" range will fit the exlude criteria. 
-          For single number: "1001" in this case, you will exlude as 1001 employees is more than 50.
+Synonyms, Variations, and Abbreviations
+
+If a concept (e.g., "CEO") is excluded in a column, also exclude any related term:
+Full forms (e.g., "Chief Executive Officer"),
+Abbreviations or punctuated forms (e.g., "C.E.O."),
+Pluralized or minor variations (e.g., "CEOs").
+Similarly, if "VP" is excluded, exclude all variations (e.g., "Vice President," "V.P.," "SVP," etc.).
+
+Close Thematic or Tangential References
+
+Exclude rows if they contain loosely or thematically related words. For example:
+If "politics" is excluded in an industry column, also exclude references to elections, government agencies, campaign contributions, or other political involvement.
+If the user excludes “CEO,” exclude references to executive leadership and similar titles.
+
+Location-Based Exclusions
+
+If a country is excluded (e.g., "USA," "US," "U.S."), exclude rows mentioning any city, region, or state within that country (e.g., "New York," "Los Angeles").
+If "Germany" is excluded, also exclude rows that mention "Berlin," "Munich," or any identifiable German region or city.
+Over-Exclusion Policy
+
+If there is any uncertainty about whether a row meets exclusion criteria, exclude it.
+Partial Word Overlaps
+
+Be mindful of words containing the excluded term:
+"CEOs" should match an exclusion for "CEO."
+However, an unrelated partial string (e.g., "oceans") does not match "CEO."
+If the overlap’s meaning is ambiguous, assume it is related and exclude.
+
+Employee Count Range
+
+The Company_employeeCountRange column can hold a range (e.g., "1000_5000") or a single number (e.g., "1001").
+If a user wants to exclude "50 or more employees," any range or single number representing ≥ 50 employees should be excluded. For example:
+A range "1000_5000" qualifies for exclusion.
+A single value "1001" also qualifies for exclusion.
         """
     else:
         # LEVELS 2, 3, AND 4: MODERATE EXCLUSIONS
