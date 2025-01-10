@@ -134,7 +134,8 @@ def build_llm_prompt(
     if debug:
         format_instructions = """
         Return pipe-separated (|) text with three columns (no header): 
-        RowIndex|Decision|Reason
+        RowIndex|Decision|Reason 
+        dont add anything else as this structured outpu will be used in a function.
 
         Where:
         - RowIndex: integer
@@ -146,6 +147,7 @@ def build_llm_prompt(
         format_instructions = """
         Return pipe-separated (|) text with two columns (no header): 
         RowIndex|Decision
+        Dont add anything else as this structured outpu will be used in a function.
 
         Where:
         - RowIndex: integer
