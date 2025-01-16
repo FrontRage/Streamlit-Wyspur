@@ -7,9 +7,66 @@ from io import StringIO
 from utils.chunking import chunk_dataframe
 from utils.df_helpers import make_chunk_summaries
 from utils.prompt_builders import build_llm_prompt
+from utils.prompt_builders import build_llm_prompt_single_col
+
 
 # We'll import our OpenAI function from openai_module
 from modules.openai_module import generate_text_basic
+
+def parse_llm_decisions_single_col(
+    llm_response: str,
+    valid_indices: set,
+    debug: bool = False
+) -> dict:
+    """
+    Parse the LLM's output for a single column chunk:
+    - We expect either "RowIndex|Decision" or "RowIndex|Decision|Reason".
+    - Return { row_idx: "KEEP" or "EXCLUDE" } for all valid row indices.
+    """
+
+    decisions = {}
+
+    try:
+        if debug:
+            # 3 columns
+            response_df = pd.read_csv(
+                StringIO(llm_response),
+                sep="|",
+                header=None,
+                names=["RowIndex", "Decision", "Reason"]
+            )
+        else:
+            # 2 columns
+            response_df = pd.read_csv(
+                StringIO(llm_response),
+                sep="|",
+                header=None,
+                names=["RowIndex", "Decision"]
+            )
+            response_df["Reason"] = ""
+
+    except Exception as e:
+        st.error(f"Error parsing LLM response: {e}")
+        st.write("Raw LLM response:")
+        st.write(llm_response)
+        return decisions
+
+    for _, row in response_df.iterrows():
+        try:
+            idx = int(row["RowIndex"])
+            if idx not in valid_indices:
+                continue
+            decision_str = str(row["Decision"]).strip().upper()
+            if decision_str not in ["KEEP", "EXCLUDE"]:
+                # If the LLM response is unexpected, skip or handle
+                continue
+
+            decisions[idx] = decision_str
+        except ValueError:
+            # row index not integer, skip
+            continue
+
+    return decisions
 
 
 def parse_llm_decisions(llm_response: str, valid_indices: set, debug: bool = False) -> dict:
@@ -175,4 +232,204 @@ def filter_df_via_llm_summaries(
                 st.write(f"(Stopped after {max_debug_display} rows...)")
                 break
 
+    return filtered_df
+
+def filter_df_via_llm_per_column(
+    df: pd.DataFrame,
+    columns_to_check: list,
+    column_keywords: dict,
+    chunk_size: int,
+    reasoning_text: str,
+    model: str,
+    temperature: float,
+    debug: bool = False
+) -> dict:
+    """
+    Step 2: For each column, we do a separate LLM call per chunk.
+    Return decisions_per_column = {
+      colName: { row_idx: "KEEP"/"EXCLUDE", ... },
+      ...
+    }
+    """
+    decisions_per_column = {}
+    if df.empty:
+        return decisions_per_column
+
+    total_rows = len(df)
+    total_chunks = (total_rows // chunk_size) + (1 if total_rows % chunk_size else 0)
+    progress_bar = st.progress(0)
+    chunks_done = 0
+
+    # We'll use an expanding container for debug logs, so they don't clutter the interface.
+    debug_container = None
+    if debug:
+        debug_container = st.container()  # We'll write logs here
+
+    for chunk_idx, chunk_df in enumerate(chunk_dataframe(df, chunk_size), start=1):
+        valid_indices = set(chunk_df.index)
+
+        if debug and debug_container:
+            with debug_container:
+                st.markdown(f"### Debug: Chunk {chunk_idx}/{total_chunks}")
+
+        for col in columns_to_check:
+            if col not in column_keywords:
+                continue  # no keywords -> skip
+
+            # build row summaries for JUST this column
+            row_summaries = []
+            for row_idx, row_data in chunk_df.iterrows():
+                text_for_llm = str(row_data[col])
+                summary = f"RowIndex={row_idx}|Column='{col}'|Text='{text_for_llm}'"
+                row_summaries.append(summary)
+
+            prompt = build_llm_prompt_single_col(
+                row_summaries=row_summaries,
+                column_name=col,
+                keywords=column_keywords[col],
+                reasoning_text=reasoning_text,
+                debug=debug
+            )
+
+            # --- DEBUG: Show the prompt
+            if debug and debug_container:
+                with debug_container.expander(f"Prompt for Column '{col}', Chunk {chunk_idx}", expanded=False):
+                    st.code(prompt, language="markdown")  
+
+            # call LLM
+            llm_response = generate_text_basic(
+                prompt,
+                model=model,
+                temperature=temperature
+            )
+
+            # --- DEBUG: Show the raw response
+            if debug and debug_container:
+                with debug_container.expander(f"LLM Response for Column '{col}', Chunk {chunk_idx}", expanded=False):
+                    st.code(llm_response, language="markdown")  
+
+            # parse decisions
+            col_decisions = parse_llm_decisions_single_col(
+                llm_response=llm_response,
+                valid_indices=valid_indices,
+                debug=debug
+            )
+            
+            if debug and debug_container:
+                with debug_container.expander(
+                    f"Parsed Decisions for Column '{col}', Chunk {chunk_idx}", expanded=False
+                ):
+                    st.write(col_decisions)
+
+            
+            # update decisions_per_column
+            if col not in decisions_per_column:
+                decisions_per_column[col] = {}
+            decisions_per_column[col].update(col_decisions)
+
+        chunks_done += 1
+        progress_bar.progress(chunks_done / total_chunks)
+
+    return decisions_per_column
+
+
+def aggregate_column_decisions(decisions_per_column: dict, debug: bool = False) -> dict:
+    """
+    Given a dictionary of the form:
+        {
+          "ColumnA": {0: "KEEP", 1: "EXCLUDE", ...},
+          "ColumnB": {0: "KEEP", 1: "KEEP",    ...},
+          ...
+        }
+    Return a final row-level dictionary:
+        final_decisions[row_index] = "KEEP" or "EXCLUDE"
+
+    Logic: row_index is "KEEP" only if *all* columns say "KEEP" for that row.
+    If a row doesn't appear in a particular column's dictionary, treat that as "EXCLUDE" or skip
+    based on your logic (usually "EXCLUDE" by default).
+    """
+    from collections import defaultdict
+
+    final_decisions = {}
+    # Gather all row indices that appear in *any* column's decision dict
+    all_row_indices = set()
+    for col_name, decision_map in decisions_per_column.items():
+        all_row_indices.update(decision_map.keys())
+
+    for row_idx in all_row_indices:
+        # We'll check each column's decision for row_idx
+        keep_for_all_columns = True  # assume True, then check for any EXCLUDE
+        for col_name, decision_map in decisions_per_column.items():
+            # if row_idx is missing from decision_map, you can treat as "EXCLUDE"
+            # or interpret it differently. Typically, we do EXCLUDE to be safe.
+            if row_idx not in decision_map:
+                keep_for_all_columns = False
+                break
+
+            decision_for_this_col = decision_map[row_idx]
+            if decision_for_this_col == "EXCLUDE":
+                keep_for_all_columns = False
+                break
+
+        if keep_for_all_columns:
+            final_decisions[row_idx] = "KEEP"
+        else:
+            final_decisions[row_idx] = "EXCLUDE"
+
+    # --------------------------
+    # DEBUG: Show final decisions, if debug=True
+    # --------------------------
+    if debug:
+        import streamlit as st
+        with st.expander("Final Aggregated Row Decisions (Debug)", expanded=False):
+            st.write(final_decisions)
+
+    return final_decisions
+
+
+def filter_df_by_aggregated_decisions(
+    df: pd.DataFrame,
+    final_decisions: dict
+) -> pd.DataFrame:
+    """
+    Given the row-level decisions, return a new DataFrame
+    containing only rows labeled 'KEEP'.
+    """
+    keep_indices = [idx for idx, dec in final_decisions.items() if dec == "KEEP"]
+    filtered_df = df.loc[keep_indices]
+    return filtered_df
+
+def filter_df_master(
+    df: pd.DataFrame,
+    columns_to_check: list,
+    column_keywords: dict,
+    chunk_size: int,
+    model: str,
+    temperature: float,
+    reasoning_text: str,
+    debug: bool = False
+) -> pd.DataFrame:
+    """
+    High-level function that:
+      1) Calls filter_df_via_llm_per_column(...) to get per-column decisions
+      2) Aggregates those decisions into row-level keep/exclude
+      3) Returns the filtered DataFrame
+    """
+    # Step 2: column-level decisions
+    decisions_per_col = filter_df_via_llm_per_column(
+        df=df,
+        columns_to_check=columns_to_check,
+        column_keywords=column_keywords,
+        chunk_size=chunk_size,
+        model=model,
+        temperature=temperature,
+        reasoning_text=reasoning_text,
+        debug=debug
+    )
+
+    # Step 3: aggregate to get final row decisions, passing debug as well
+    final_decisions = aggregate_column_decisions(decisions_per_col, debug=debug)
+
+    # Use the final decisions to filter the DataFrame
+    filtered_df = filter_df_by_aggregated_decisions(df, final_decisions)
     return filtered_df

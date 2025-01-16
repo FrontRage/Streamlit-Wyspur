@@ -2,44 +2,36 @@ import streamlit as st
 import pandas as pd
 
 # Import modules for tools
-from modules.filter_logic import filter_df_via_llm_summaries
+from modules.filter_logic import filter_df_via_llm_summaries  # OLD approach
 from modules.fuzzy_logic import python_pre_filter_fuzzy
 from utils.prompt_builders import build_user_instructions, build_conceptual_text
-
-# Define models and descriptions for dropdown
 from config import MODEL_OPTIONS, DEFAULT_MODEL
+
+# NEW: import your column-by-column approach
+# Make sure you import from wherever you placed the new code (filter_logic.py or filter_logic_per_column.py).
+from modules.filter_logic import filter_df_master
 
 # Define credentials
 USERNAME = "test123"
 PASSWORD = "test123"
 
-
 def authenticate(username, password):
     return username == USERNAME and password == PASSWORD
-
 
 def login_page():
     """
     Display a simple centered login page with a logo and credentials input.
     """
-    # Set the page layout to wide and center elements
     st.set_page_config(layout="centered")
-
-    # Placeholder for the login page content
     placeholder = st.empty()
 
-    # Display login content inside the placeholder
     with placeholder.container():
-        # Display the logo
         st.image("wyspur.png", width=200)
-
-        # Login form
         st.title("Login")
         username = st.text_input("Username", key="login_username")
         password = st.text_input("Password", type="password", key="login_password")
         login_button = st.button("Login")
 
-        # Authenticate user
         if login_button:
             if authenticate(username, password):
                 st.session_state.authenticated = True
@@ -47,10 +39,8 @@ def login_page():
             else:
                 st.session_state.auth_failed = True
 
-        # Show error message if login failed
         if st.session_state.get("auth_failed"):
             st.error("Invalid username or password")
-
 
 def calculator_tool():
     """
@@ -94,10 +84,9 @@ def filter_tool():
     all_columns = df.columns.tolist()
     selected_columns = st.multiselect("Pick one or more columns to filter on:", all_columns)
 
-    # Gather exclude keywords per selected column
     column_keywords = {}
     for col in selected_columns:
-        user_input = st.text_input(f"Enter exclude concepts for '{col}' (comma-separated)")
+        user_input = st.text_input(f"Enter filter keywords for '{col}' (comma-separated)")
         if user_input.strip():
             keywords_list = [kw.strip() for kw in user_input.split(",") if kw.strip()]
             column_keywords[col] = keywords_list
@@ -108,9 +97,7 @@ def filter_tool():
     )
     st.write("---")
 
-    # Build conceptual instructions from slider
     conceptual_instructions = build_conceptual_text(conceptual_slider)
-
     chunk_size = st.number_input(
         "Chunk Size for LLM Processing",
         value=100,
@@ -128,13 +115,12 @@ def filter_tool():
     )
     st.write(f"**Selected Model:** {selected_model}")
 
-    # Show a warning if "o1" or "o1-mini" is selected
     if selected_model in ["o1", "o1-mini"]:
         st.warning(
             "\u26A0\uFE0F You've selected an expensive model! Consider using 'GPT-4o-mini' for affordability."
         )
 
-    # Optional: Debug mode
+    # Debug mode
     debug_mode = st.checkbox("Show LLM debugging info?", value=True)
 
     # 5) Temperature slider
@@ -156,22 +142,24 @@ def filter_tool():
     else:
         df_for_filtering = df
 
-    # 7) Build user instructions for LLM
+    # 7) Build user instructions for LLM (used by OLD approach)
     user_instructions = build_user_instructions(column_keywords)
 
-    # 8) Filter via LLM
-    if st.button("Filter CSV with LLM"):
+    # ---------------------
+    # OLD: Single Prompt Approach (filter_df_via_llm_summaries)
+    # ---------------------
+    if st.button("Filter CSV with LLM (Single Prompt)"):
         st.write("Filtering in progress...")
 
         filtered_df = filter_df_via_llm_summaries(
             df=df_for_filtering,
             user_instructions_text=user_instructions,
             columns_to_summarize=selected_columns,
-            chunk_size=chunk_size,           # Pass the chunk size
-            conceptual_slider=conceptual_slider,  # Pass the slider value
-            reasoning_text=conceptual_instructions,  # Provide conceptual text
-            model=selected_model,           # Pass the selected model
-            temperature=temperature,        # Pass the temperature value
+            chunk_size=chunk_size,
+            conceptual_slider=conceptual_slider,
+            reasoning_text=conceptual_instructions,
+            model=selected_model,
+            temperature=temperature,
             debug=debug_mode
         )
 
@@ -179,41 +167,65 @@ def filter_tool():
             f"Filtering complete! {len(filtered_df)} rows remain "
             f"out of {len(df_for_filtering)} pre-filtered rows."
         )
-        st.write("Preview of filtered data:")
+        st.write("Preview of filtered data (OLD approach):")
         st.dataframe(filtered_df.head(50))
 
-        # 9) Allow user to download the filtered CSV
         csv_data = filtered_df.to_csv(index=False)
         st.download_button(
-            label="Download Filtered CSV",
+            label="Download Filtered CSV (OLD approach)",
             data=csv_data,
-            file_name="filtered_output.csv",
+            file_name="filtered_output_old.csv",
+            mime="text/csv"
+        )
+
+    # ---------------------
+    # NEW: Column-by-Column Approach
+    # ---------------------
+    if st.button("Filter CSV with LLM (Per-Column Approach)"):
+        st.write("Filtering in progress... (Per-Column)")
+
+        filtered_df = filter_df_master(
+            df=df_for_filtering,
+            columns_to_check=selected_columns,
+            column_keywords=column_keywords,
+            chunk_size=chunk_size,
+            reasoning_text=conceptual_instructions,
+            model=selected_model,
+            temperature=temperature,
+            debug=debug_mode
+        )
+
+        st.success(
+            f"Filtering complete! {len(filtered_df)} rows remain "
+            f"out of {len(df_for_filtering)} pre-filtered rows."
+        )
+        st.write("Preview of filtered data (Per-Column approach):")
+        st.dataframe(filtered_df.head(50))
+
+        csv_data = filtered_df.to_csv(index=False)
+        st.download_button(
+            label="Download Filtered CSV (Per-Column approach)",
+            data=csv_data,
+            file_name="filtered_output_per_column.csv",
             mime="text/csv"
         )
 
 
 def main():
-    """
-    Main function to display the login page or authenticated content.
-    """
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
 
     if not st.session_state.authenticated:
         login_page()
     else:
-        # Sidebar configuration with company logo
         with st.sidebar:
             st.image("wyspur.png", use_container_width=True)
             st.title("Wyspur AI Tools")
-
-            # Initialize session states
             if "show_filter_tool" not in st.session_state:
-                st.session_state.show_filter_tool = True  # Default to showing filter tool
+                st.session_state.show_filter_tool = True
             if "show_calculator_tool" not in st.session_state:
                 st.session_state.show_calculator_tool = False
 
-            # Sidebar buttons for navigation
             if st.button("AI Filter Tool"):
                 st.session_state.show_filter_tool = True
                 st.session_state.show_calculator_tool = False
@@ -222,7 +234,6 @@ def main():
                 st.session_state.show_filter_tool = False
                 st.session_state.show_calculator_tool = True
 
-        # Main content area
         if st.session_state.show_filter_tool:
             filter_tool()
         elif st.session_state.show_calculator_tool:
