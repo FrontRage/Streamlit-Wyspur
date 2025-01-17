@@ -1,46 +1,100 @@
 import streamlit as st
 import pandas as pd
+from io import BytesIO
 
-# Import modules for tools
-from modules.filter_logic import filter_df_via_llm_summaries  # OLD approach
-from modules.fuzzy_logic import python_pre_filter_fuzzy
-from utils.prompt_builders import build_user_instructions, build_conceptual_text
-from config import MODEL_OPTIONS, DEFAULT_MODEL
+# ------------------------------
+# HELPER FUNCTIONS FOR COMPARISON
+# ------------------------------
+def read_file(uploaded_file):
+    """Read CSV or Excel file into a pandas DataFrame."""
+    if uploaded_file.name.lower().endswith('.csv'):
+        return pd.read_csv(uploaded_file)
+    else:
+        return pd.read_excel(uploaded_file)
 
-# NEW: import your column-by-column approach
-# Make sure you import from wherever you placed the new code (filter_logic.py or filter_logic_per_column.py).
-from modules.filter_logic import filter_df_master
-
-# Define credentials
-USERNAME = "test123"
-PASSWORD = "test123"
-
-def authenticate(username, password):
-    return username == USERNAME and password == PASSWORD
-
-def login_page():
+def shorten_sheet_name(filename, prefix="Non_Matches_"):
     """
-    Display a simple centered login page with a logo and credentials input.
+    Creates a safe Excel sheet name, which must be <= 31 characters.
+    We'll remove the extension and truncate if necessary.
     """
-    st.set_page_config(layout="centered")
-    placeholder = st.empty()
+    base_name = filename.rsplit('.', 1)[0]  # remove extension
+    sheet_name = prefix + base_name
+    return sheet_name[:31]  # Excel sheet name limit
 
-    with placeholder.container():
-        st.image("wyspur.png", width=200)
-        st.title("Login")
-        username = st.text_input("Username", key="login_username")
-        password = st.text_input("Password", type="password", key="login_password")
-        login_button = st.button("Login")
 
-        if login_button:
-            if authenticate(username, password):
-                st.session_state.authenticated = True
-                st.session_state.auth_failed = False
-            else:
-                st.session_state.auth_failed = True
+# ------------------------------
+# MAIN TOOLS
+# ------------------------------
+def compare_tool():
+    """
+    Compare Files Tool UI logic.
+    """
+    st.title("Compare Two Files by ProfileId")
 
-        if st.session_state.get("auth_failed"):
-            st.error("Invalid username or password")
+    # Let user specify the column name (defaults to 'ProfileId')
+    col_name = st.text_input("Enter the column name to match on", "ProfileId")
+
+    st.write("Upload your two CSV or Excel files below:")
+    file1 = st.file_uploader("Upload first file", type=["csv", "xlsx", "xls"])
+    file2 = st.file_uploader("Upload second file", type=["csv", "xlsx", "xls"])
+
+    if file1 and file2:
+        # Read the files into dataframes
+        df1 = read_file(file1)
+        df2 = read_file(file2)
+
+        # Check that the chosen column exists in both dataframes
+        if col_name not in df1.columns or col_name not in df2.columns:
+            st.error(f"Column '{col_name}' not found in one or both files. Please check and try again.")
+            return
+
+        # Convert the column to string in both dataframes to avoid dtype mismatches
+        df1[col_name] = df1[col_name].astype(str)
+        df2[col_name] = df2[col_name].astype(str)
+
+        # Find matching IDs
+        matching_ids = set(df1[col_name]) & set(df2[col_name])
+
+        # Create DataFrame with Matches: rows in df1 whose ProfileId is also in df2
+        df_matches = df1[df1[col_name].isin(matching_ids)].copy()
+
+        # Non-matches in file1
+        df_non_matches_file1 = df1[~df1[col_name].isin(matching_ids)].copy()
+        # Non-matches in file2
+        df_non_matches_file2 = df2[~df2[col_name].isin(matching_ids)].copy()
+
+        # Display small previews
+        st.subheader("Preview: Matches (from file1)")
+        st.write(df_matches.head())
+
+        st.subheader(f"Preview: Non Matches in {file1.name}")
+        st.write(df_non_matches_file1.head())
+
+        st.subheader(f"Preview: Non Matches in {file2.name}")
+        st.write(df_non_matches_file2.head())
+
+        # Prepare an Excel file in memory
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            # Write Matches
+            df_matches.to_excel(writer, index=False, sheet_name='Matches')
+
+            # Write Non-matches for File1
+            file1_sheet_name = shorten_sheet_name(file1.name)
+            df_non_matches_file1.to_excel(writer, index=False, sheet_name=file1_sheet_name)
+
+            # Write Non-matches for File2
+            file2_sheet_name = shorten_sheet_name(file2.name)
+            df_non_matches_file2.to_excel(writer, index=False, sheet_name=file2_sheet_name)
+
+        # Create a download button
+        st.download_button(
+            label="Download Comparison Results",
+            data=output.getvalue(),
+            file_name="comparison_result.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
 
 def calculator_tool():
     """
@@ -62,6 +116,16 @@ def calculator_tool():
         result = num1 / num2 if num2 != 0 else "Error: Division by zero"
 
     st.write(f"Result: {result}")
+
+
+# Import modules for tools
+from modules.filter_logic import filter_df_via_llm_summaries  # OLD approach
+from modules.fuzzy_logic import python_pre_filter_fuzzy
+from utils.prompt_builders import build_user_instructions, build_conceptual_text
+from config import MODEL_OPTIONS, DEFAULT_MODEL
+
+# NEW: import your column-by-column approach
+from modules.filter_logic import filter_df_master
 
 
 def filter_tool():
@@ -121,7 +185,7 @@ def filter_tool():
         )
 
     # Debug mode
-    debug_mode = st.checkbox("Show LLM debugging info?", value=True)
+    debug_mode = st.checkbox("Show LLM debugging info?", value=False)
 
     # 5) Temperature slider
     temperature = st.slider(
@@ -133,7 +197,7 @@ def filter_tool():
     )
 
     # 6) Fuzzy pre-filter option
-    apply_fuzzy = st.checkbox("Apply Python-based Fuzzy Pre-Filter?", value=True)
+    apply_fuzzy = st.checkbox("Apply Python-based Fuzzy Pre-Filter?", value=False)
     if apply_fuzzy and column_keywords:
         st.info("Using fuzzy pre-filter with threshold=85 to remove obvious matches before LLM filtering.")
         df_pre_filtered, excluded_rows = python_pre_filter_fuzzy(df, column_keywords, threshold=85)
@@ -145,13 +209,22 @@ def filter_tool():
     # 7) Build user instructions for LLM (used by OLD approach)
     user_instructions = build_user_instructions(column_keywords)
 
+    # ---------------------------------------------------------------------
+    # SESSION STATE CHANGES (to persist the Per-Column results across reruns)
+    # ---------------------------------------------------------------------
+    # Initialize session_state DataFrames (if they don't exist yet)
+    if "filtered_df_col" not in st.session_state:
+        st.session_state.filtered_df_col = None
+    if "excluded_df_col" not in st.session_state:
+        st.session_state.excluded_df_col = None
+
     # ---------------------
     # OLD: Single Prompt Approach (filter_df_via_llm_summaries)
     # ---------------------
     if st.button("Filter CSV with LLM (Single Prompt)"):
         st.write("Filtering in progress...")
 
-        filtered_df = filter_df_via_llm_summaries(
+        filtered_df_old = filter_df_via_llm_summaries(
             df=df_for_filtering,
             user_instructions_text=user_instructions,
             columns_to_summarize=selected_columns,
@@ -164,16 +237,16 @@ def filter_tool():
         )
 
         st.success(
-            f"Filtering complete! {len(filtered_df)} rows remain "
+            f"Filtering complete! {len(filtered_df_old)} rows remain "
             f"out of {len(df_for_filtering)} pre-filtered rows."
         )
         st.write("Preview of filtered data (OLD approach):")
-        st.dataframe(filtered_df.head(50))
+        st.dataframe(filtered_df_old.head(50))
 
-        csv_data = filtered_df.to_csv(index=False)
+        csv_data_old = filtered_df_old.to_csv(index=False)
         st.download_button(
             label="Download Filtered CSV (OLD approach)",
-            data=csv_data,
+            data=csv_data_old,
             file_name="filtered_output_old.csv",
             mime="text/csv"
         )
@@ -184,7 +257,7 @@ def filter_tool():
     if st.button("Filter CSV with LLM (Per-Column Approach)"):
         st.write("Filtering in progress... (Per-Column)")
 
-        filtered_df = filter_df_master(
+        filtered_df_col = filter_df_master(
             df=df_for_filtering,
             columns_to_check=selected_columns,
             column_keywords=column_keywords,
@@ -195,21 +268,81 @@ def filter_tool():
             debug=debug_mode
         )
 
+        excluded_df_col = df_for_filtering[~df_for_filtering.index.isin(filtered_df_col.index)]
+
+        # Store in session_state so we don't lose data on next rerun
+        st.session_state.filtered_df_col = filtered_df_col
+        st.session_state.excluded_df_col = excluded_df_col
+
         st.success(
-            f"Filtering complete! {len(filtered_df)} rows remain "
+            f"Filtering complete! {len(filtered_df_col)} rows remain "
             f"out of {len(df_for_filtering)} pre-filtered rows."
         )
-        st.write("Preview of filtered data (Per-Column approach):")
-        st.dataframe(filtered_df.head(50))
 
-        csv_data = filtered_df.to_csv(index=False)
+    # ---------------------------------------------------------------------
+    # If we already have data in session_state, display the previews & downloads
+    # ---------------------------------------------------------------------
+    if st.session_state.filtered_df_col is not None:
+        st.write("Preview of filtered data (Per-Column approach):")
+        st.dataframe(st.session_state.filtered_df_col.head(50))
+
+        st.write("---")
+        st.write(f"Number of excluded rows: {len(st.session_state.excluded_df_col)}")
+        st.dataframe(st.session_state.excluded_df_col.head(50))
+
+        # Download KEPT rows
+        csv_data_filtered = st.session_state.filtered_df_col.to_csv(index=False)
         st.download_button(
-            label="Download Filtered CSV (Per-Column approach)",
-            data=csv_data,
+            label="Download Filtered (Kept) CSV (Per-Column)",
+            data=csv_data_filtered,
             file_name="filtered_output_per_column.csv",
-            mime="text/csv"
+            mime="text/csv",
+            key="download_kept_btn"  # give a unique key
         )
 
+        # Download EXCLUDED rows
+        csv_data_excluded = st.session_state.excluded_df_col.to_csv(index=False)
+        st.download_button(
+            label="Download Excluded (Removed) CSV (Per-Column)",
+            data=csv_data_excluded,
+            file_name="excluded_output_per_column.csv",
+            mime="text/csv",
+            key="download_excluded_btn"  # give a unique key
+        )
+
+
+# ------------------------------
+# AUTHENTICATION + MAIN LAYOUT
+# ------------------------------
+USERNAME = "test123"
+PASSWORD = "test123"
+
+def authenticate(username, password):
+    return username == USERNAME and password == PASSWORD
+
+def login_page():
+    """
+    Display a simple centered login page with a logo and credentials input.
+    """
+    st.set_page_config(layout="centered")
+    placeholder = st.empty()
+
+    with placeholder.container():
+        st.image("wyspur.png", width=200)
+        st.title("Login")
+        username = st.text_input("Username", key="login_username")
+        password = st.text_input("Password", type="password", key="login_password")
+        login_button = st.button("Login")
+
+        if login_button:
+            if authenticate(username, password):
+                st.session_state.authenticated = True
+                st.session_state.auth_failed = False
+            else:
+                st.session_state.auth_failed = True
+
+        if st.session_state.get("auth_failed"):
+            st.error("Invalid username or password")
 
 def main():
     if "authenticated" not in st.session_state:
@@ -218,27 +351,40 @@ def main():
     if not st.session_state.authenticated:
         login_page()
     else:
+        # Initialize which page to show
+        if "show_filter_tool" not in st.session_state:
+            st.session_state.show_filter_tool = True
+        if "show_compare_tool" not in st.session_state:
+            st.session_state.show_compare_tool = False
+        if "show_calculator_tool" not in st.session_state:
+            st.session_state.show_calculator_tool = False
+
         with st.sidebar:
             st.image("wyspur.png", use_container_width=True)
             st.title("Wyspur AI Tools")
-            if "show_filter_tool" not in st.session_state:
-                st.session_state.show_filter_tool = True
-            if "show_calculator_tool" not in st.session_state:
-                st.session_state.show_calculator_tool = False
 
             if st.button("AI Filter Tool"):
                 st.session_state.show_filter_tool = True
+                st.session_state.show_compare_tool = False
+                st.session_state.show_calculator_tool = False
+
+            if st.button("Compare Files"):
+                st.session_state.show_filter_tool = False
+                st.session_state.show_compare_tool = True
                 st.session_state.show_calculator_tool = False
 
             if st.button("Calculator"):
                 st.session_state.show_filter_tool = False
+                st.session_state.show_compare_tool = False
                 st.session_state.show_calculator_tool = True
 
+        # Decide which tool to show:
         if st.session_state.show_filter_tool:
             filter_tool()
+        elif st.session_state.show_compare_tool:
+            compare_tool()
         elif st.session_state.show_calculator_tool:
             calculator_tool()
-
 
 if __name__ == "__main__":
     main()

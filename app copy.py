@@ -1,16 +1,74 @@
 import streamlit as st
 import pandas as pd
 
-# Imports from your modules:
-from modules.filter_logic import filter_df_via_llm_summaries
+# Import modules for tools
+from modules.filter_logic import filter_df_via_llm_summaries  # OLD approach
 from modules.fuzzy_logic import python_pre_filter_fuzzy
 from utils.prompt_builders import build_user_instructions, build_conceptual_text
-
-# Define models and descriptions for dropdown
 from config import MODEL_OPTIONS, DEFAULT_MODEL
 
-def main():
-    st.title("Wyspur AI Conceptual CSV Filter")
+# NEW: import your column-by-column approach
+# Make sure you import from wherever you placed the new code (filter_logic.py or filter_logic_per_column.py).
+from modules.filter_logic import filter_df_master
+
+# Define credentials
+USERNAME = "test123"
+PASSWORD = "test123"
+
+def authenticate(username, password):
+    return username == USERNAME and password == PASSWORD
+
+def login_page():
+    """
+    Display a simple centered login page with a logo and credentials input.
+    """
+    st.set_page_config(layout="centered")
+    placeholder = st.empty()
+
+    with placeholder.container():
+        st.image("wyspur.png", width=200)
+        st.title("Login")
+        username = st.text_input("Username", key="login_username")
+        password = st.text_input("Password", type="password", key="login_password")
+        login_button = st.button("Login")
+
+        if login_button:
+            if authenticate(username, password):
+                st.session_state.authenticated = True
+                st.session_state.auth_failed = False
+            else:
+                st.session_state.auth_failed = True
+
+        if st.session_state.get("auth_failed"):
+            st.error("Invalid username or password")
+
+def calculator_tool():
+    """
+    Calculator tool UI logic.
+    """
+    st.header("Calculator")
+
+    num1 = st.number_input("Enter first number", value=0.0, format="%.2f", key="num1_input")
+    num2 = st.number_input("Enter second number", value=0.0, format="%.2f", key="num2_input")
+    operation = st.selectbox("Select operation", ["Add", "Subtract", "Multiply", "Divide"], key="operation_selectbox")
+
+    if operation == "Add":
+        result = num1 + num2
+    elif operation == "Subtract":
+        result = num1 - num2
+    elif operation == "Multiply":
+        result = num1 * num2
+    elif operation == "Divide":
+        result = num1 / num2 if num2 != 0 else "Error: Division by zero"
+
+    st.write(f"Result: {result}")
+
+
+def filter_tool():
+    """
+    Filter tool UI logic.
+    """
+    st.header("Wyspur AI Conceptual CSV Filter")
 
     # 1) File upload
     uploaded_file = st.file_uploader("Upload a CSV file to filter", type=["csv"])
@@ -26,23 +84,20 @@ def main():
     all_columns = df.columns.tolist()
     selected_columns = st.multiselect("Pick one or more columns to filter on:", all_columns)
 
-    # Gather exclude keywords per selected column
     column_keywords = {}
     for col in selected_columns:
-        user_input = st.text_input(f"Enter exclude concepts for '{col}' (comma-separated)")
+        user_input = st.text_input(f"Enter filter keywords for '{col}' (comma-separated)")
         if user_input.strip():
             keywords_list = [kw.strip() for kw in user_input.split(",") if kw.strip()]
             column_keywords[col] = keywords_list
 
     # 3) Conceptual reasoning slider & chunk size input
     conceptual_slider = st.slider(
-        "Conceptual Reasoning Strictness (1=Very Strict, 5=Very Broad)", 1, 5, 3
+        "Conceptual Reasoning Strictness (1=Very Strict, 5=Very Broad)", 1, 5, 5
     )
     st.write("---")
 
-    # Build conceptual instructions from slider
     conceptual_instructions = build_conceptual_text(conceptual_slider)
-
     chunk_size = st.number_input(
         "Chunk Size for LLM Processing",
         value=100,
@@ -60,16 +115,24 @@ def main():
     )
     st.write(f"**Selected Model:** {selected_model}")
 
-    # Show a warning if "o1" or "o1-mini" is selected
     if selected_model in ["o1", "o1-mini"]:
         st.warning(
-            "⚠️ You've selected an expensive model! Consider using 'GPT-4o-mini' for affordability."
+            "\u26A0\uFE0F You've selected an expensive model! Consider using 'GPT-4o-mini' for affordability."
         )
 
-    # Optional: Debug mode
+    # Debug mode
     debug_mode = st.checkbox("Show LLM debugging info?", value=True)
 
-    # 5) Fuzzy pre-filter option
+    # 5) Temperature slider
+    temperature = st.slider(
+        "Temperature (0=deterministic, 1=creative)",
+        min_value=0.0,
+        max_value=1.0,
+        value=1.0,
+        step=0.1
+    )
+
+    # 6) Fuzzy pre-filter option
     apply_fuzzy = st.checkbox("Apply Python-based Fuzzy Pre-Filter?", value=True)
     if apply_fuzzy and column_keywords:
         st.info("Using fuzzy pre-filter with threshold=85 to remove obvious matches before LLM filtering.")
@@ -79,21 +142,24 @@ def main():
     else:
         df_for_filtering = df
 
-    # 6) Build user instructions for LLM
+    # 7) Build user instructions for LLM (used by OLD approach)
     user_instructions = build_user_instructions(column_keywords)
 
-    # 7) Filter via LLM
-    if st.button("Filter CSV with LLM"):
+    # ---------------------
+    # OLD: Single Prompt Approach (filter_df_via_llm_summaries)
+    # ---------------------
+    if st.button("Filter CSV with LLM (Single Prompt)"):
         st.write("Filtering in progress...")
 
         filtered_df = filter_df_via_llm_summaries(
             df=df_for_filtering,
             user_instructions_text=user_instructions,
             columns_to_summarize=selected_columns,
-            chunk_size=chunk_size,           # Pass the chunk size
-            conceptual_slider=conceptual_slider,  # Pass the slider value
-            reasoning_text=conceptual_instructions,  # Provide conceptual text
-            model=selected_model,           # Pass the selected model
+            chunk_size=chunk_size,
+            conceptual_slider=conceptual_slider,
+            reasoning_text=conceptual_instructions,
+            model=selected_model,
+            temperature=temperature,
             debug=debug_mode
         )
 
@@ -101,17 +167,78 @@ def main():
             f"Filtering complete! {len(filtered_df)} rows remain "
             f"out of {len(df_for_filtering)} pre-filtered rows."
         )
-        st.write("Preview of filtered data:")
+        st.write("Preview of filtered data (OLD approach):")
         st.dataframe(filtered_df.head(50))
 
-        # 8) Allow user to download the filtered CSV
         csv_data = filtered_df.to_csv(index=False)
         st.download_button(
-            label="Download Filtered CSV",
+            label="Download Filtered CSV (OLD approach)",
             data=csv_data,
-            file_name="filtered_output.csv",
+            file_name="filtered_output_old.csv",
             mime="text/csv"
         )
+
+    # ---------------------
+    # NEW: Column-by-Column Approach
+    # ---------------------
+    if st.button("Filter CSV with LLM (Per-Column Approach)"):
+        st.write("Filtering in progress... (Per-Column)")
+
+        filtered_df = filter_df_master(
+            df=df_for_filtering,
+            columns_to_check=selected_columns,
+            column_keywords=column_keywords,
+            chunk_size=chunk_size,
+            reasoning_text=conceptual_instructions,
+            model=selected_model,
+            temperature=temperature,
+            debug=debug_mode
+        )
+
+        st.success(
+            f"Filtering complete! {len(filtered_df)} rows remain "
+            f"out of {len(df_for_filtering)} pre-filtered rows."
+        )
+        st.write("Preview of filtered data (Per-Column approach):")
+        st.dataframe(filtered_df.head(50))
+
+        csv_data = filtered_df.to_csv(index=False)
+        st.download_button(
+            label="Download Filtered CSV (Per-Column approach)",
+            data=csv_data,
+            file_name="filtered_output_per_column.csv",
+            mime="text/csv"
+        )
+
+
+def main():
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if not st.session_state.authenticated:
+        login_page()
+    else:
+        with st.sidebar:
+            st.image("wyspur.png", use_container_width=True)
+            st.title("Wyspur AI Tools")
+            if "show_filter_tool" not in st.session_state:
+                st.session_state.show_filter_tool = True
+            if "show_calculator_tool" not in st.session_state:
+                st.session_state.show_calculator_tool = False
+
+            if st.button("AI Filter Tool"):
+                st.session_state.show_filter_tool = True
+                st.session_state.show_calculator_tool = False
+
+            if st.button("Calculator"):
+                st.session_state.show_filter_tool = False
+                st.session_state.show_calculator_tool = True
+
+        if st.session_state.show_filter_tool:
+            filter_tool()
+        elif st.session_state.show_calculator_tool:
+            calculator_tool()
+
 
 if __name__ == "__main__":
     main()
