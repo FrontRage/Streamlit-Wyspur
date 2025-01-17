@@ -164,7 +164,7 @@ def filter_tool():
     conceptual_instructions = build_conceptual_text(conceptual_slider)
     chunk_size = st.number_input(
         "Chunk Size for LLM Processing",
-        value=100,
+        value=400,
         min_value=1,
         step=1,
         help="Fewer rows per chunk reduces prompt size, but increases the number of LLM calls."
