@@ -221,35 +221,35 @@ def filter_tool():
     # ---------------------
     # OLD: Single Prompt Approach (filter_df_via_llm_summaries)
     # ---------------------
-    if st.button("Filter CSV with LLM (Single Prompt)"):
-        st.write("Filtering in progress...")
+    #if st.button("Filter CSV with LLM (Single Prompt)"):
+     #   st.write("Filtering in progress...")
 
-        filtered_df_old = filter_df_via_llm_summaries(
-            df=df_for_filtering,
-            user_instructions_text=user_instructions,
-            columns_to_summarize=selected_columns,
-            chunk_size=chunk_size,
-            conceptual_slider=conceptual_slider,
-            reasoning_text=conceptual_instructions,
-            model=selected_model,
-            temperature=temperature,
-            debug=debug_mode
-        )
+      #  filtered_df_old = filter_df_via_llm_summaries(
+       #     df=df_for_filtering,
+        #    user_instructions_text=user_instructions,
+         #   columns_to_summarize=selected_columns,
+          #  chunk_size=chunk_size,
+           # conceptual_slider=conceptual_slider,
+            #reasoning_text=conceptual_instructions,
+            #model=selected_model,
+            #temperature=temperature,
+            #debug=debug_mode
+        #)
 
-        st.success(
-            f"Filtering complete! {len(filtered_df_old)} rows remain "
-            f"out of {len(df_for_filtering)} pre-filtered rows."
-        )
-        st.write("Preview of filtered data (OLD approach):")
-        st.dataframe(filtered_df_old.head(50))
+        #st.success(
+          #  f"Filtering complete! {len(filtered_df_old)} rows remain "
+         #   f"out of {len(df_for_filtering)} pre-filtered rows."
+        #)
+        #st.write("Preview of filtered data (OLD approach):")
+        #st.dataframe(filtered_df_old.head(50))
 
-        csv_data_old = filtered_df_old.to_csv(index=False)
-        st.download_button(
-            label="Download Filtered CSV (OLD approach)",
-            data=csv_data_old,
-            file_name="filtered_output_old.csv",
-            mime="text/csv"
-        )
+        #csv_data_old = filtered_df_old.to_csv(index=False)
+        #st.download_button(
+            #label="Download Filtered CSV (OLD approach)",
+           # data=csv_data_old,
+          #  file_name="filtered_output_old.csv",
+         #   mime="text/csv"
+        #)
 
     # ---------------------
     # NEW: Column-by-Column Approach
