@@ -32,7 +32,6 @@ def generate_text_basic(
     )
     return response.choices[0].message.content
 
-
 def generate_text_with_conversation(messages, model="gpt-4o-mini") -> str:
     """
     Uses the same chat.completions.create endpoint but allows passing
