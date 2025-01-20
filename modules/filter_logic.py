@@ -9,15 +9,24 @@ from time import sleep
 # We'll import from our utils modules:
 from utils.chunking import chunk_dataframe
 from utils.df_helpers import make_chunk_summaries
-from utils.prompt_builders import build_llm_prompt
-from utils.prompt_builders import build_llm_prompt_single_col
 from utils.prompt_builders import build_llm_prompt_single_col_json
 
 
 # We'll import our OpenAI function from openai_module
 from modules.openai_module import generate_text_basic
+from modules.openai_module import generate_text_with_function_call
 
+#### VISUAL MAP OF FUCNTION CALLING###
 
+#filter_df_master
+#├── filter_df_via_llm_per_column
+#│   ├── chunk_dataframe (from utils.chunking)
+#│   ├── build_llm_prompt_single_col_json (from utils.prompt_builders)
+#│   ├── generate_text_basic (from modules.openai_module)
+#│   └── parse_llm_decisions_single_col_json
+#│       └── clean_and_parse_json
+#├── aggregate_column_decisions
+#└── filter_df_by_aggregated_decisions
 
 def clean_and_parse_json(llm_response: str) -> list:
     """
@@ -61,17 +70,18 @@ def clean_and_parse_json(llm_response: str) -> list:
 
 
 def parse_llm_decisions_single_col_json(
-    llm_response: str,
+    llm_response: list,
     valid_indices: set,
     debug: bool = False,
 ) -> dict:
     """
-    Parse a JSON-formatted LLM response for a single column chunk.
+    Process a structured JSON response from the LLM for a single column chunk.
 
     Parameters
     ----------
-    llm_response : str
-        The raw JSON response from the LLM.
+    llm_response : list
+        A structured JSON response from the LLM, where each item is a dictionary 
+        containing "RowIndex" and "Decision".
     valid_indices : set
         Set of valid row indices for this chunk.
     debug : bool, optional
@@ -82,18 +92,10 @@ def parse_llm_decisions_single_col_json(
     dict
         A dictionary mapping row indices to decisions ("KEEP" or "EXCLUDE").
     """
-
     decisions = {}
 
     try:
-        # Sanitize and parse JSON using the utility function
-        json_data = clean_and_parse_json(llm_response)
-
-        if json_data is None:
-            raise ValueError("Failed to parse LLM response into valid JSON.")
-
-        # Process the parsed data
-        for item in json_data:
+        for item in llm_response:
             row_idx = item.get("RowIndex")
             decision_str = item.get("Decision", "").strip().upper()
 
@@ -109,124 +111,14 @@ def parse_llm_decisions_single_col_json(
                     st.warning(f"Invalid row or index out of bounds: {item}")
 
     except Exception as e:
-        st.error(f"Error parsing LLM response: {e}")
+        st.error(f"Error processing LLM response: {e}")
         if debug:
-            st.write("LLM response causing the issue:")
-            st.code(llm_response, language="json")
+            st.json(llm_response)
 
     return decisions
 
 
-def filter_df_via_llm_summaries(
-    df: pd.DataFrame,
-    user_instructions_text: str,
-    columns_to_summarize: list,
-    chunk_size: int = 20,
-    conceptual_slider: int = 5,
-    reasoning_text: str = "",  # <-- Added this param to inject conceptual text
-    model: str = "gpt-3.5-turbo",
-    temperature: float = 0.0,
-    top_p: float = 1.0,
-    debug: bool = False,
-    max_debug_display: int = 50
-) -> pd.DataFrame:
-    """
-    Filters the DataFrame using an LLM-based conceptual exclusion approach.
 
-    Steps:
-      1. Chunk the DataFrame into smaller pieces.
-      2. Build summaries for each row in the chunk (for context).
-      3. Construct an LLM prompt with instructions + row summaries (+ conceptual reasoning).
-      4. Parse the LLM's decisions (KEEP or EXCLUDE).
-      5. Combine decisions from all chunks and create the filtered DataFrame.
-
-    Args:
-        df (pd.DataFrame): The DataFrame to filter.
-        user_instructions_text (str): The AND-logic instructions for columns/keywords.
-        columns_to_summarize (list): List of columns to summarize in the prompt.
-        chunk_size (int): Number of rows per chunk (default 200).
-        conceptual_slider (int): Slider value (1 to 5) for conceptual strictness.
-        reasoning_text (str): Extra conceptual instructions from build_conceptual_text().
-        model (str): OpenAI model name (default "gpt-3.5-turbo").
-        temperature (float): Sampling temperature (0..2).
-        top_p (float): Nucleus sampling (0..1).
-        debug (bool): If True, includes the Reason column + displays LLM prompts/responses.
-        max_debug_display (int): How many decisions to display in debug summary.
-
-    Returns:
-        pd.DataFrame: The filtered DataFrame, containing only rows kept by the LLM.
-    """
-
-    decisions = {}
-    total_rows = len(df)
-    if total_rows == 0:
-        # Edge case: empty dataframe
-        return df
-
-    # Calculate how many chunks in total
-    total_chunks = (total_rows // chunk_size) + (1 if total_rows % chunk_size else 0)
-    progress_bar = st.progress(0)
-    current_chunk = 0
-
-    for chunk_idx, chunk_df in enumerate(chunk_dataframe(df, chunk_size)):
-        current_chunk += 1
-
-        # Prepare a set of valid indices for this chunk
-        valid_indices_set = set(chunk_df.index)
-
-        # Summaries for each row in the chunk
-        row_summaries = make_chunk_summaries(chunk_df, columns_to_summarize)
-
-        # Build the LLM prompt
-        prompt_for_llm = build_llm_prompt(
-            row_summaries=row_summaries,
-            min_idx=chunk_df.index.min(),
-            max_idx=chunk_df.index.max(),
-            user_instructions_text=user_instructions_text,
-            reasoning_text=reasoning_text,  # <-- Now we actually pass your conceptual text
-            debug=debug
-        )
-
-        # Call the LLM via our generate_text_basic function
-        llm_response = generate_text_basic(
-            prompt_for_llm,
-            model=model,
-            temperature=temperature,
-            top_p=top_p
-        )
-
-        # Debug output
-        if debug:
-            st.markdown(f"### Debug Info for Chunk {chunk_idx}")
-            with st.expander("LLM Prompt"):
-                st.write(prompt_for_llm)
-            with st.expander("LLM Raw Response"):
-                st.write(llm_response)
-
-        # Parse decisions from the LLM's response
-        chunk_decisions = parse_llm_decisions(llm_response, valid_indices_set, debug=debug)
-        decisions.update(chunk_decisions)
-
-        # Update progress bar
-        progress_fraction = current_chunk / total_chunks
-        progress_bar.progress(progress_fraction)
-
-    # Final decisions: keep only rows that are "KEEP"
-    keep_indices = [idx for idx, (dec, _) in decisions.items() if dec == "KEEP"]
-    filtered_df = df.loc[keep_indices]
-
-    # (Optional) Display debug summary of decisions
-    if debug and max_debug_display > 0:
-        st.subheader("LLM Debug Decisions (Sample)")
-        display_count = 0
-        for idx, (dec, rsn) in decisions.items():
-            st.write(f"Row {idx}: {dec} | Reason: {rsn}")
-            display_count += 1
-            if display_count >= max_debug_display:
-                st.write(f"(Stopped after {max_debug_display} rows...)")
-                break
-
-    return filtered_df
 
 def filter_df_via_llm_per_column(
     df: pd.DataFrame,
@@ -316,8 +208,7 @@ def filter_df_via_llm_per_column(
                 row_summaries=row_summaries,
                 column_name=col,
                 keywords=column_keywords[col],
-                reasoning_text=reasoning_text,
-                debug=debug
+                reasoning_text=reasoning_text
             )
 
             # Debug: Show the prompt
@@ -326,16 +217,17 @@ def filter_df_via_llm_per_column(
                     st.code(prompt, language="markdown")
 
             # Generate the LLM response
-            llm_response = generate_text_basic(
-                prompt,
+            llm_response = generate_text_with_function_call(
+                prompt=prompt,
                 model=model,
-                temperature=temperature
+                temperature=temperature,
+                debug=debug
             )
 
-            # Debug: Show the raw JSON response
+            # Debug: Show the structured JSON response
             if debug_container:
-                with debug_container.expander(f"LLM JSON Response for Column '{col}', Chunk {chunk_idx}", expanded=False):
-                    st.code(llm_response, language="json")
+                with debug_container.expander(f"LLM JSON Response for Column '{col}', Chunk {chunk_idx} (Structured JSON)", expanded=False):
+                    st.json(llm_response)
 
             # Parse JSON decisions
             try:
@@ -348,7 +240,7 @@ def filter_df_via_llm_per_column(
                 st.error(f"Failed to parse LLM response for Column '{col}', Chunk {chunk_idx}: {e}")
                 if debug:
                     st.write("LLM response causing the issue:")
-                    st.code(llm_response, language="json")
+                    st.json(llm_response)
                 continue
 
             # Debug: Show parsed decisions
@@ -366,6 +258,7 @@ def filter_df_via_llm_per_column(
         progress_bar.progress(chunks_done / total_chunks)
 
     return decisions_per_column
+
 
 
 

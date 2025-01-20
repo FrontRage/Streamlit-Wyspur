@@ -3,328 +3,127 @@ import pandas as pd
 import sys
 from io import StringIO
 import json
+import re
+from time import sleep
 
 # We'll import from our utils modules:
 from utils.chunking import chunk_dataframe
 from utils.df_helpers import make_chunk_summaries
-from utils.prompt_builders import build_llm_prompt
-from utils.prompt_builders import build_llm_prompt_single_col
 from utils.prompt_builders import build_llm_prompt_single_col_json
 
 
 # We'll import our OpenAI function from openai_module
 from modules.openai_module import generate_text_basic
 
+#### VISUAL MAP OF FUCNTION CALLING###
+
+#filter_df_master
+#├── filter_df_via_llm_per_column
+#│   ├── chunk_dataframe (from utils.chunking)
+#│   ├── build_llm_prompt_single_col_json (from utils.prompt_builders)
+#│   ├── generate_text_basic (from modules.openai_module)
+#│   └── parse_llm_decisions_single_col_json
+#│       └── clean_and_parse_json
+#├── aggregate_column_decisions
+#└── filter_df_by_aggregated_decisions
+
+def clean_and_parse_json(llm_response: str) -> list:
+    """
+    Cleans and parses JSON from the LLM response. Handles issues like unescaped backslashes,
+    incomplete JSON, and ensures robust parsing.
+
+    Args:
+        llm_response (str): The raw JSON string from the LLM.
+
+    Returns:
+        list: Parsed JSON as Python objects (list of dictionaries), or None if parsing fails.
+    """
+    import json
+    import re
+
+    try:
+        # Step 1: Fix unescaped backslashes
+        cleaned_response = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', llm_response)
+
+        # Step 2: Ensure the response starts and ends correctly
+        if not cleaned_response.strip().startswith("["):
+            cleaned_response = "[" + cleaned_response.lstrip()
+        if not cleaned_response.strip().endswith("]"):
+            cleaned_response = cleaned_response.rstrip() + "]"
+
+        # Step 3: Attempt to parse the cleaned JSON
+        parsed_data = json.loads(cleaned_response)
+
+        # Step 4: Validate the parsed data is a list of dictionaries
+        if not isinstance(parsed_data, list) or not all(isinstance(item, dict) for item in parsed_data):
+            raise ValueError("Parsed JSON is not a list of dictionaries.")
+
+        return parsed_data
+
+    except (json.JSONDecodeError, ValueError) as e:
+        # Debugging information for troubleshooting
+        print(f"Error parsing JSON: {e}")
+        print(f"Original LLM response: {llm_response}")
+        print(f"Cleaned LLM response: {cleaned_response}")
+        return None
 
 
 def parse_llm_decisions_single_col_json(
     llm_response: str,
     valid_indices: set,
-    debug: bool = False
+    debug: bool = False,
 ) -> dict:
     """
     Parse a JSON-formatted LLM response for a single column chunk.
 
-    This function expects the LLM to return a JSON array of objects.
-    Each object should have at least:
-      - "RowIndex": integer
-      - "Decision": "KEEP" or "EXCLUDE"
-      - "Reason": optional if debug=False (omitted) or present if debug=True (but we ignore it here).
-
-    We then build a dictionary:
-      { row_idx: "KEEP" or "EXCLUDE" }
-
     Parameters
     ----------
     llm_response : str
-        The raw text response from the LLM, which should be valid JSON (an array of objects).
+        The raw JSON response from the LLM.
     valid_indices : set
-        The set of row indices we expect for this chunk. We skip any row index not in this set.
-    debug : bool
-        If True, we log additional debugging info (e.g. the raw JSON if parsing fails).
+        Set of valid row indices for this chunk.
+    debug : bool, optional
+        Whether to include debug information, by default False.
 
     Returns
     -------
     dict
-        A dictionary mapping row_index -> "KEEP" or "EXCLUDE".
-
-    Notes
-    -----
-    - If the LLM returns invalid or malformed JSON, we log an error and return an empty dictionary.
-    - If a row's "Decision" is anything other than "KEEP"/"EXCLUDE", we skip that row.
-    - This function should be used after generating a JSON-based prompt
-      (like `build_llm_prompt_single_col_json`) and receiving the LLM's JSON response.
-
-    Example JSON response (debug=True):
-    [
-      {
-        "RowIndex": 100,
-        "Decision": "KEEP",
-        "Reason": "Contains 'CEO'"
-      },
-      {
-        "RowIndex": 101,
-        "Decision": "EXCLUDE",
-        "Reason": "No matching keywords"
-      }
-    ]
+        A dictionary mapping row indices to decisions ("KEEP" or "EXCLUDE").
     """
-    import streamlit as st
 
     decisions = {}
 
     try:
-        # Attempt to parse the JSON string
-        json_data = json.loads(llm_response)
+        # Sanitize and parse JSON using the utility function
+        json_data = clean_and_parse_json(llm_response)
 
-        # We expect a list of objects, but in case it's something else, wrap in list
-        if not isinstance(json_data, list):
-            st.warning("LLM response is not a list. Attempting to treat as single object array.")
-            json_data = [json_data]
+        if json_data is None:
+            raise ValueError("Failed to parse LLM response into valid JSON.")
 
-        # Iterate over each item in the JSON array
+        # Process the parsed data
         for item in json_data:
-            # Safely extract fields
             row_idx = item.get("RowIndex")
             decision_str = item.get("Decision", "").strip().upper()
 
-            # Check that row_idx is valid and is within the chunk's valid indices
+            # Validate row index and decision
             if isinstance(row_idx, int) and row_idx in valid_indices:
-                # Only store if it's a recognized decision
                 if decision_str in ["KEEP", "EXCLUDE"]:
                     decisions[row_idx] = decision_str
+                else:
+                    if debug:
+                        st.warning(f"Invalid decision value skipped: {decision_str} for RowIndex: {row_idx}")
+            else:
+                if debug:
+                    st.warning(f"Invalid row or index out of bounds: {item}")
 
     except Exception as e:
-        # Log an error if JSON parsing fails
-        st.error(f"Error parsing JSON from LLM: {e}")
+        st.error(f"Error parsing LLM response: {e}")
         if debug:
-            st.write("Raw LLM response (debug):")
+            st.write("LLM response causing the issue:")
             st.code(llm_response, language="json")
 
     return decisions
 
-
-
-def parse_llm_decisions_single_col(
-    llm_response: str,
-    valid_indices: set,
-    debug: bool = False
-) -> dict:
-    """
-    Parse the LLM's output for a single column chunk:
-    - We expect either "RowIndex|Decision" or "RowIndex|Decision|Reason".
-    - Return { row_idx: "KEEP" or "EXCLUDE" } for all valid row indices.
-    """
-
-    decisions = {}
-
-    try:
-        if debug:
-            # 3 columns
-            response_df = pd.read_csv(
-                StringIO(llm_response),
-                sep="|",
-                header=None,
-                names=["RowIndex", "Decision", "Reason"]
-            )
-        else:
-            # 2 columns
-            response_df = pd.read_csv(
-                StringIO(llm_response),
-                sep="|",
-                header=None,
-                names=["RowIndex", "Decision"]
-            )
-            response_df["Reason"] = ""
-
-    except Exception as e:
-        st.error(f"Error parsing LLM response: {e}")
-        st.write("Raw LLM response:")
-        st.write(llm_response)
-        return decisions
-
-    for _, row in response_df.iterrows():
-        try:
-            idx = int(row["RowIndex"])
-            if idx not in valid_indices:
-                continue
-            decision_str = str(row["Decision"]).strip().upper()
-            if decision_str not in ["KEEP", "EXCLUDE"]:
-                # If the LLM response is unexpected, skip or handle
-                continue
-
-            decisions[idx] = decision_str
-        except ValueError:
-            # row index not integer, skip
-            continue
-
-    return decisions
-
-
-def parse_llm_decisions(llm_response: str, valid_indices: set, debug: bool = False) -> dict:
-    """
-    Parse the LLM's pipe-delimited response into a dictionary of 
-    row_index -> (Decision, Reason).
-
-    If debug=False, we expect the format: RowIndex|Decision
-    If debug=True, we expect the format:  RowIndex|Decision|Reason
-    
-    Returns: 
-      - A dict mapping each row_index to a tuple (Decision, Reason).
-        e.g. { 0: ("KEEP", "Explanation..."), 1: ("EXCLUDE", "Another reason...") }
-    """
-    decisions = {}
-
-    try:
-        if debug:
-            # Expect three columns: RowIndex, Decision, Reason
-            response_df = pd.read_csv(
-                StringIO(llm_response),
-                sep="|",
-                header=None,
-                names=["RowIndex", "Decision", "Reason"]
-            )
-        else:
-            # Expect two columns: RowIndex, Decision
-            response_df = pd.read_csv(
-                StringIO(llm_response),
-                sep="|",
-                header=None,
-                names=["RowIndex", "Decision"]
-            )
-            response_df["Reason"] = ""  # Fill in a blank reason column if debug=False
-    except Exception as e:
-        st.error(f"Error parsing LLM response: {e}")
-        st.write("Raw LLM response:")
-        st.write(llm_response)
-        return {}
-
-    for _, row in response_df.iterrows():
-        try:
-            row_index = int(row["RowIndex"])
-            decision = str(row["Decision"]).strip().upper()
-            reason = str(row["Reason"]) if pd.notnull(row["Reason"]) else ""
-
-            # Only store the decision if the RowIndex is valid for this chunk
-            if row_index in valid_indices:
-                decisions[row_index] = (decision, reason)
-        except ValueError:
-            # If RowIndex is not a valid integer, skip
-            continue
-
-    return decisions
-
-
-def filter_df_via_llm_summaries(
-    df: pd.DataFrame,
-    user_instructions_text: str,
-    columns_to_summarize: list,
-    chunk_size: int = 20,
-    conceptual_slider: int = 5,
-    reasoning_text: str = "",  # <-- Added this param to inject conceptual text
-    model: str = "gpt-3.5-turbo",
-    temperature: float = 0.0,
-    top_p: float = 1.0,
-    debug: bool = False,
-    max_debug_display: int = 50
-) -> pd.DataFrame:
-    """
-    Filters the DataFrame using an LLM-based conceptual exclusion approach.
-
-    Steps:
-      1. Chunk the DataFrame into smaller pieces.
-      2. Build summaries for each row in the chunk (for context).
-      3. Construct an LLM prompt with instructions + row summaries (+ conceptual reasoning).
-      4. Parse the LLM's decisions (KEEP or EXCLUDE).
-      5. Combine decisions from all chunks and create the filtered DataFrame.
-
-    Args:
-        df (pd.DataFrame): The DataFrame to filter.
-        user_instructions_text (str): The AND-logic instructions for columns/keywords.
-        columns_to_summarize (list): List of columns to summarize in the prompt.
-        chunk_size (int): Number of rows per chunk (default 200).
-        conceptual_slider (int): Slider value (1 to 5) for conceptual strictness.
-        reasoning_text (str): Extra conceptual instructions from build_conceptual_text().
-        model (str): OpenAI model name (default "gpt-3.5-turbo").
-        temperature (float): Sampling temperature (0..2).
-        top_p (float): Nucleus sampling (0..1).
-        debug (bool): If True, includes the Reason column + displays LLM prompts/responses.
-        max_debug_display (int): How many decisions to display in debug summary.
-
-    Returns:
-        pd.DataFrame: The filtered DataFrame, containing only rows kept by the LLM.
-    """
-
-    decisions = {}
-    total_rows = len(df)
-    if total_rows == 0:
-        # Edge case: empty dataframe
-        return df
-
-    # Calculate how many chunks in total
-    total_chunks = (total_rows // chunk_size) + (1 if total_rows % chunk_size else 0)
-    progress_bar = st.progress(0)
-    current_chunk = 0
-
-    for chunk_idx, chunk_df in enumerate(chunk_dataframe(df, chunk_size)):
-        current_chunk += 1
-
-        # Prepare a set of valid indices for this chunk
-        valid_indices_set = set(chunk_df.index)
-
-        # Summaries for each row in the chunk
-        row_summaries = make_chunk_summaries(chunk_df, columns_to_summarize)
-
-        # Build the LLM prompt
-        prompt_for_llm = build_llm_prompt(
-            row_summaries=row_summaries,
-            min_idx=chunk_df.index.min(),
-            max_idx=chunk_df.index.max(),
-            user_instructions_text=user_instructions_text,
-            reasoning_text=reasoning_text,  # <-- Now we actually pass your conceptual text
-            debug=debug
-        )
-
-        # Call the LLM via our generate_text_basic function
-        llm_response = generate_text_basic(
-            prompt_for_llm,
-            model=model,
-            temperature=temperature,
-            top_p=top_p
-        )
-
-        # Debug output
-        if debug:
-            st.markdown(f"### Debug Info for Chunk {chunk_idx}")
-            with st.expander("LLM Prompt"):
-                st.write(prompt_for_llm)
-            with st.expander("LLM Raw Response"):
-                st.write(llm_response)
-
-        # Parse decisions from the LLM's response
-        chunk_decisions = parse_llm_decisions(llm_response, valid_indices_set, debug=debug)
-        decisions.update(chunk_decisions)
-
-        # Update progress bar
-        progress_fraction = current_chunk / total_chunks
-        progress_bar.progress(progress_fraction)
-
-    # Final decisions: keep only rows that are "KEEP"
-    keep_indices = [idx for idx, (dec, _) in decisions.items() if dec == "KEEP"]
-    filtered_df = df.loc[keep_indices]
-
-    # (Optional) Display debug summary of decisions
-    if debug and max_debug_display > 0:
-        st.subheader("LLM Debug Decisions (Sample)")
-        display_count = 0
-        for idx, (dec, rsn) in decisions.items():
-            st.write(f"Row {idx}: {dec} | Reason: {rsn}")
-            display_count += 1
-            if display_count >= max_debug_display:
-                st.write(f"(Stopped after {max_debug_display} rows...)")
-                break
-
-    return filtered_df
 
 def filter_df_via_llm_per_column(
     df: pd.DataFrame,
@@ -423,7 +222,7 @@ def filter_df_via_llm_per_column(
                 with debug_container.expander(f"Prompt for Column '{col}', Chunk {chunk_idx} (JSON)", expanded=False):
                     st.code(prompt, language="markdown")
 
-            # 3) Call the LLM
+            # Generate the LLM response
             llm_response = generate_text_basic(
                 prompt,
                 model=model,
@@ -435,19 +234,26 @@ def filter_df_via_llm_per_column(
                 with debug_container.expander(f"LLM JSON Response for Column '{col}', Chunk {chunk_idx}", expanded=False):
                     st.code(llm_response, language="json")
 
-            # 4) Parse JSON decisions
-            col_decisions = parse_llm_decisions_single_col_json(
-                llm_response=llm_response,
-                valid_indices=valid_indices,
-                debug=debug
-            )
+            # Parse JSON decisions
+            try:
+                col_decisions = parse_llm_decisions_single_col_json(
+                    llm_response=llm_response,
+                    valid_indices=valid_indices,
+                    debug=debug
+                )
+            except Exception as e:
+                st.error(f"Failed to parse LLM response for Column '{col}', Chunk {chunk_idx}: {e}")
+                if debug:
+                    st.write("LLM response causing the issue:")
+                    st.code(llm_response, language="json")
+                continue
 
             # Debug: Show parsed decisions
             if debug_container:
                 with debug_container.expander(f"Parsed JSON Decisions for Column '{col}', Chunk {chunk_idx}", expanded=False):
                     st.write(col_decisions)
 
-            # 5) Update decisions_per_column
+            # Update decisions_per_column
             if col not in decisions_per_column:
                 decisions_per_column[col] = {}
             decisions_per_column[col].update(col_decisions)
@@ -457,6 +263,7 @@ def filter_df_via_llm_per_column(
         progress_bar.progress(chunks_done / total_chunks)
 
     return decisions_per_column
+
 
 
 

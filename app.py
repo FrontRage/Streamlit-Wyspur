@@ -1,6 +1,13 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
+# Import modules for tools
+from modules.fuzzy_logic import python_pre_filter_fuzzy
+from utils.prompt_builders import build_user_instructions, build_conceptual_text
+from config import MODEL_OPTIONS, DEFAULT_MODEL
+
+# NEW: import your column-by-column approach
+from modules.filter_logic import filter_df_master
 
 # ------------------------------
 # HELPER FUNCTIONS FOR COMPARISON
@@ -118,14 +125,7 @@ def calculator_tool():
     st.write(f"Result: {result}")
 
 
-# Import modules for tools
-from modules.filter_logic import filter_df_via_llm_summaries  # OLD approach
-from modules.fuzzy_logic import python_pre_filter_fuzzy
-from utils.prompt_builders import build_user_instructions, build_conceptual_text
-from config import MODEL_OPTIONS, DEFAULT_MODEL
 
-# NEW: import your column-by-column approach
-from modules.filter_logic import filter_df_master
 
 
 def filter_tool():
@@ -217,39 +217,6 @@ def filter_tool():
         st.session_state.filtered_df_col = None
     if "excluded_df_col" not in st.session_state:
         st.session_state.excluded_df_col = None
-
-    # ---------------------
-    # OLD: Single Prompt Approach (filter_df_via_llm_summaries)
-    # ---------------------
-    #if st.button("Filter CSV with LLM (Single Prompt)"):
-     #   st.write("Filtering in progress...")
-
-      #  filtered_df_old = filter_df_via_llm_summaries(
-       #     df=df_for_filtering,
-        #    user_instructions_text=user_instructions,
-         #   columns_to_summarize=selected_columns,
-          #  chunk_size=chunk_size,
-           # conceptual_slider=conceptual_slider,
-            #reasoning_text=conceptual_instructions,
-            #model=selected_model,
-            #temperature=temperature,
-            #debug=debug_mode
-        #)
-
-        #st.success(
-          #  f"Filtering complete! {len(filtered_df_old)} rows remain "
-         #   f"out of {len(df_for_filtering)} pre-filtered rows."
-        #)
-        #st.write("Preview of filtered data (OLD approach):")
-        #st.dataframe(filtered_df_old.head(50))
-
-        #csv_data_old = filtered_df_old.to_csv(index=False)
-        #st.download_button(
-            #label="Download Filtered CSV (OLD approach)",
-           # data=csv_data_old,
-          #  file_name="filtered_output_old.csv",
-         #   mime="text/csv"
-        #)
 
     # ---------------------
     # NEW: Column-by-Column Approach
