@@ -24,7 +24,7 @@ from modules.openai_module import generate_text_with_function_call
 #│   ├── build_llm_prompt_single_col_json (from utils.prompt_builders)
 #│   ├── generate_text_basic (from modules.openai_module)
 #│   └── parse_llm_decisions_single_col_json
-#│       └── clean_and_parse_json
+#│       └── clean_and_parse_json # no longer used because we expect funtion calling form openai to return JSON
 #├── aggregate_column_decisions
 #└── filter_df_by_aggregated_decisions
 
@@ -39,8 +39,6 @@ def clean_and_parse_json(llm_response: str) -> list:
     Returns:
         list: Parsed JSON as Python objects (list of dictionaries), or None if parsing fails.
     """
-    import json
-    import re
 
     try:
         # Step 1: Fix unescaped backslashes
@@ -151,7 +149,7 @@ def filter_df_via_llm_per_column(
     reasoning_text : str
         Conceptual instructions (e.g. from the slider).
     model : str
-        Which LLM model to call (e.g. "gpt-3.5-turbo").
+        Which LLM model to call (e.g., "gpt-3.5-turbo").
     temperature : float
         Sampling temperature for the LLM call.
     debug : bool, optional
@@ -169,6 +167,14 @@ def filter_df_via_llm_per_column(
       parse_llm_decisions_single_col_json to parse the returned JSON.
     - For row-level decisions, see aggregate_column_decisions() and filter_df_by_aggregated_decisions().
     """
+    import logging
+
+    logging.basicConfig(
+        filename="llm_debug.log",
+        level=logging.DEBUG,
+        format="%(asctime)s - %(levelname)s - %(message)s"
+    )
+
     decisions_per_column = {}
     if df.empty:
         return decisions_per_column
@@ -217,30 +223,32 @@ def filter_df_via_llm_per_column(
                     st.code(prompt, language="markdown")
 
             # Generate the LLM response
-            llm_response = generate_text_with_function_call(
-                prompt=prompt,
-                model=model,
-                temperature=temperature,
-                debug=debug
-            )
-
-            # Debug: Show the structured JSON response
-            if debug_container:
-                with debug_container.expander(f"LLM JSON Response for Column '{col}', Chunk {chunk_idx} (Structured JSON)", expanded=False):
-                    st.json(llm_response)
-
-            # Parse JSON decisions
             try:
+                llm_response = generate_text_with_function_call(
+                    prompt=prompt,
+                    model=model,
+                    temperature=temperature,
+                    debug=debug
+                )
+
+                # Debug: Show the structured JSON response
+                if debug_container:
+                    with debug_container.expander(f"LLM JSON Response for Column '{col}', Chunk {chunk_idx} (Structured JSON)", expanded=False):
+                        st.json(llm_response)
+
+                # Parse JSON decisions
                 col_decisions = parse_llm_decisions_single_col_json(
                     llm_response=llm_response,
                     valid_indices=valid_indices,
                     debug=debug
                 )
+
             except Exception as e:
-                st.error(f"Failed to parse LLM response for Column '{col}', Chunk {chunk_idx}: {e}")
-                if debug:
-                    st.write("LLM response causing the issue:")
-                    st.json(llm_response)
+                error_message = f"Failed to parse LLM response for Column '{col}', Chunk {chunk_idx}: {e}"
+                st.error(error_message)
+                logging.error(error_message)
+
+                st.json(llm_response)  # Always show the raw JSON response
                 continue
 
             # Debug: Show parsed decisions
@@ -263,7 +271,7 @@ def filter_df_via_llm_per_column(
 
 
 
-def aggregate_column_decisions(decisions_per_column: dict, debug: bool = False) -> dict:
+def aggregate_column_decisions(decisions_per_column: dict, debug: bool = False) -> (dict, dict):
     """
     Given a dictionary of the form:
         {
@@ -271,51 +279,59 @@ def aggregate_column_decisions(decisions_per_column: dict, debug: bool = False) 
           "ColumnB": {0: "KEEP", 1: "KEEP",    ...},
           ...
         }
-    Return a final row-level dictionary:
-        final_decisions[row_index] = "KEEP" or "EXCLUDE"
+    Return two dictionaries:
+        1) final_decisions[row_index] = "KEEP" or "EXCLUDE"
+        2) exclusion_reasons[row_index] = list of columns that triggered "EXCLUDE"
 
-    Logic: row_index is "KEEP" only if *all* columns say "KEEP" for that row.
-    If a row doesn't appear in a particular column's dictionary, treat that as "EXCLUDE" or skip
-    based on your logic (usually "EXCLUDE" by default).
+    Logic: a row_index is "KEEP" only if *all* columns say "KEEP" for that row.
+           If a row doesn't appear in a particular column's dictionary,
+           or if that column says "EXCLUDE," the row becomes "EXCLUDE."
     """
     from collections import defaultdict
+    import streamlit as st
 
     final_decisions = {}
+    # We'll accumulate all the columns that caused each row_idx to be "EXCLUDE"
+    exclusion_reasons = defaultdict(list)  # row_idx -> list of columns that said EXCLUDE
+
     # Gather all row indices that appear in *any* column's decision dict
     all_row_indices = set()
     for col_name, decision_map in decisions_per_column.items():
         all_row_indices.update(decision_map.keys())
 
+    # For each row that appears anywhere, decide if it's overall KEEP or EXCLUDE
     for row_idx in all_row_indices:
-        # We'll check each column's decision for row_idx
-        keep_for_all_columns = True  # assume True, then check for any EXCLUDE
-        for col_name, decision_map in decisions_per_column.items():
-            # if row_idx is missing from decision_map, you can treat as "EXCLUDE"
-            # or interpret it differently. Typically, we do EXCLUDE to be safe.
-            if row_idx not in decision_map:
-                keep_for_all_columns = False
-                break
+        keep_for_all_columns = True
 
-            decision_for_this_col = decision_map[row_idx]
+        for col_name, decision_map in decisions_per_column.items():
+            # If row_idx is missing from decision_map => treat that as EXCLUDE
+            decision_for_this_col = decision_map.get(row_idx, "EXCLUDE")
+
             if decision_for_this_col == "EXCLUDE":
                 keep_for_all_columns = False
-                break
+                # Record which column(s) triggered EXCLUDE
+                exclusion_reasons[row_idx].append(col_name)
+                # Since we only need to know that at least one column excludes it,
+                # we can break early. (But you can remove this break if you want
+                # to list *all* columns that say EXCLUDE).
+                # break
 
+        # Final outcome for this row
         if keep_for_all_columns:
             final_decisions[row_idx] = "KEEP"
         else:
             final_decisions[row_idx] = "EXCLUDE"
 
-    # --------------------------
-    # DEBUG: Show final decisions, if debug=True
-    # --------------------------
+    # Debug info if needed
     if debug:
-        import streamlit as st
         with st.expander("Final Aggregated Row Decisions (Debug)", expanded=False):
             st.write(final_decisions)
+        with st.expander("Exclusion Reasons (Columns Triggering EXCLUDE)", expanded=False):
+            # Convert the defaultdict to a normal dict for cleaner display
+            st.write(dict(exclusion_reasons))
 
-    return final_decisions
-
+    # Return both (final decisions + which columns triggered exclude)
+    return final_decisions, dict(exclusion_reasons)
 
 def filter_df_by_aggregated_decisions(
     df: pd.DataFrame,
@@ -342,8 +358,9 @@ def filter_df_master(
     """
     High-level function that:
       1) Calls filter_df_via_llm_per_column(...) to get per-column decisions
-      2) Aggregates those decisions into row-level keep/exclude
-      3) Returns the filtered DataFrame
+      2) Aggregates those decisions into row-level keep/exclude (and collects which columns caused exclude)
+      3) Stores those exclusion reasons in a 'exclusion_reason' column
+      4) Returns the filtered DataFrame (containing only rows labeled 'KEEP')
     """
     # Step 2: column-level decisions
     decisions_per_col = filter_df_via_llm_per_column(
@@ -357,9 +374,19 @@ def filter_df_master(
         debug=debug
     )
 
-    # Step 3: aggregate to get final row decisions, passing debug as well
-    final_decisions = aggregate_column_decisions(decisions_per_col, debug=debug)
+    # Step 3: aggregate decisions => get final_decisions + columns that triggered EXCLUDE
+    # NOTE: We now expect aggregate_column_decisions to return (final_decisions, exclusion_reasons)
+    final_decisions, exclusion_reasons = aggregate_column_decisions(
+        decisions_per_col,
+        debug=debug
+    )
 
-    # Use the final decisions to filter the DataFrame
+    # Store the exclusion reasons for each row in a debug column
+    # (rows that remain 'KEEP' will have an empty string, i.e. no excluded columns).
+    df["exclusion_reason"] = df.index.map(
+        lambda idx: ", ".join(exclusion_reasons.get(idx, []))
+    )
+
+    # Use the final decisions to filter the DataFrame to only 'KEEP' rows
     filtered_df = filter_df_by_aggregated_decisions(df, final_decisions)
     return filtered_df

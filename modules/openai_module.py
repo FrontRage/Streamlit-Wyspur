@@ -51,7 +51,6 @@ def generate_text_with_conversation(messages, model="gpt-4o-mini") -> str:
     return response.choices[0].message.content
 
 
-
 def generate_text_with_function_call(
     prompt: str,
     model: str,
@@ -134,4 +133,3 @@ def generate_text_with_function_call(
         return structured_data
     except (json.JSONDecodeError, KeyError) as e:
         raise ValueError(f"Failed to decode function response: {e}")
-

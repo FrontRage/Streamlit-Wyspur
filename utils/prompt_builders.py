@@ -114,7 +114,7 @@ def build_llm_prompt_single_col_json(
     """
     system_instructions = f"""
     You are an advanced LLM conceptual reasoning filter, focusing on **one column**: "{column_name}".
-    Traditional filters cannot catch synonyms, slight variations, ranges, or tangential connections, but you can!
+    Traditional filters cannot catch synonyms, slight variations, ranges, but you can!
 
     **Context for This Column**:
     - You are analyzing "{column_name}" entries in a spreadsheet. 

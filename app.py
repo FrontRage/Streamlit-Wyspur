@@ -28,7 +28,6 @@ def shorten_sheet_name(filename, prefix="Non_Matches_"):
     sheet_name = prefix + base_name
     return sheet_name[:31]  # Excel sheet name limit
 
-
 # ------------------------------
 # MAIN TOOLS
 # ------------------------------
@@ -102,7 +101,6 @@ def compare_tool():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-
 def calculator_tool():
     """
     Calculator tool UI logic.
@@ -123,10 +121,6 @@ def calculator_tool():
         result = num1 / num2 if num2 != 0 else "Error: Division by zero"
 
     st.write(f"Result: {result}")
-
-
-
-
 
 def filter_tool():
     """
@@ -224,6 +218,7 @@ def filter_tool():
     if st.button("Filter CSV with LLM (Per-Column Approach)"):
         st.write("Filtering in progress... (Per-Column)")
 
+        # <-- CHANGED: moved filter_df_master call inside this button block
         filtered_df_col = filter_df_master(
             df=df_for_filtering,
             columns_to_check=selected_columns,
@@ -235,9 +230,10 @@ def filter_tool():
             debug=debug_mode
         )
 
+        # Determine which rows were excluded by comparing indices
         excluded_df_col = df_for_filtering[~df_for_filtering.index.isin(filtered_df_col.index)]
 
-        # Store in session_state so we don't lose data on next rerun
+        # Store in session state for viewing/downloading
         st.session_state.filtered_df_col = filtered_df_col
         st.session_state.excluded_df_col = excluded_df_col
 
@@ -247,7 +243,7 @@ def filter_tool():
         )
 
     # ---------------------------------------------------------------------
-    # If we already have data in session_state, display the previews & downloads
+    # If we have data in session_state, display the previews & downloads
     # ---------------------------------------------------------------------
     if st.session_state.filtered_df_col is not None:
         st.write("Preview of filtered data (Per-Column approach):")
@@ -276,7 +272,6 @@ def filter_tool():
             mime="text/csv",
             key="download_excluded_btn"  # give a unique key
         )
-
 
 # ------------------------------
 # AUTHENTICATION + MAIN LAYOUT

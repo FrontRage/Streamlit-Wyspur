@@ -14,6 +14,7 @@ from utils.prompt_builders import build_llm_prompt_single_col_json
 
 # We'll import our OpenAI function from openai_module
 from modules.openai_module import generate_text_basic
+from modules.openai_module import generate_text_with_function_call
 
 #### VISUAL MAP OF FUCNTION CALLING###
 
@@ -38,8 +39,6 @@ def clean_and_parse_json(llm_response: str) -> list:
     Returns:
         list: Parsed JSON as Python objects (list of dictionaries), or None if parsing fails.
     """
-    import json
-    import re
 
     try:
         # Step 1: Fix unescaped backslashes
@@ -69,17 +68,18 @@ def clean_and_parse_json(llm_response: str) -> list:
 
 
 def parse_llm_decisions_single_col_json(
-    llm_response: str,
+    llm_response: list,
     valid_indices: set,
     debug: bool = False,
 ) -> dict:
     """
-    Parse a JSON-formatted LLM response for a single column chunk.
+    Process a structured JSON response from the LLM for a single column chunk.
 
     Parameters
     ----------
-    llm_response : str
-        The raw JSON response from the LLM.
+    llm_response : list
+        A structured JSON response from the LLM, where each item is a dictionary 
+        containing "RowIndex" and "Decision".
     valid_indices : set
         Set of valid row indices for this chunk.
     debug : bool, optional
@@ -90,18 +90,10 @@ def parse_llm_decisions_single_col_json(
     dict
         A dictionary mapping row indices to decisions ("KEEP" or "EXCLUDE").
     """
-
     decisions = {}
 
     try:
-        # Sanitize and parse JSON using the utility function
-        json_data = clean_and_parse_json(llm_response)
-
-        if json_data is None:
-            raise ValueError("Failed to parse LLM response into valid JSON.")
-
-        # Process the parsed data
-        for item in json_data:
+        for item in llm_response:
             row_idx = item.get("RowIndex")
             decision_str = item.get("Decision", "").strip().upper()
 
@@ -117,12 +109,13 @@ def parse_llm_decisions_single_col_json(
                     st.warning(f"Invalid row or index out of bounds: {item}")
 
     except Exception as e:
-        st.error(f"Error parsing LLM response: {e}")
+        st.error(f"Error processing LLM response: {e}")
         if debug:
-            st.write("LLM response causing the issue:")
-            st.code(llm_response, language="json")
+            st.json(llm_response)
 
     return decisions
+
+
 
 
 def filter_df_via_llm_per_column(
@@ -156,7 +149,7 @@ def filter_df_via_llm_per_column(
     reasoning_text : str
         Conceptual instructions (e.g. from the slider).
     model : str
-        Which LLM model to call (e.g. "gpt-3.5-turbo").
+        Which LLM model to call (e.g., "gpt-3.5-turbo").
     temperature : float
         Sampling temperature for the LLM call.
     debug : bool, optional
@@ -174,6 +167,14 @@ def filter_df_via_llm_per_column(
       parse_llm_decisions_single_col_json to parse the returned JSON.
     - For row-level decisions, see aggregate_column_decisions() and filter_df_by_aggregated_decisions().
     """
+    import logging
+
+    logging.basicConfig(
+        filename="llm_debug.log",
+        level=logging.DEBUG,
+        format="%(asctime)s - %(levelname)s - %(message)s"
+    )
+
     decisions_per_column = {}
     if df.empty:
         return decisions_per_column
@@ -213,8 +214,7 @@ def filter_df_via_llm_per_column(
                 row_summaries=row_summaries,
                 column_name=col,
                 keywords=column_keywords[col],
-                reasoning_text=reasoning_text,
-                debug=debug
+                reasoning_text=reasoning_text
             )
 
             # Debug: Show the prompt
@@ -223,29 +223,32 @@ def filter_df_via_llm_per_column(
                     st.code(prompt, language="markdown")
 
             # Generate the LLM response
-            llm_response = generate_text_basic(
-                prompt,
-                model=model,
-                temperature=temperature
-            )
-
-            # Debug: Show the raw JSON response
-            if debug_container:
-                with debug_container.expander(f"LLM JSON Response for Column '{col}', Chunk {chunk_idx}", expanded=False):
-                    st.code(llm_response, language="json")
-
-            # Parse JSON decisions
             try:
+                llm_response = generate_text_with_function_call(
+                    prompt=prompt,
+                    model=model,
+                    temperature=temperature,
+                    debug=debug
+                )
+
+                # Debug: Show the structured JSON response
+                if debug_container:
+                    with debug_container.expander(f"LLM JSON Response for Column '{col}', Chunk {chunk_idx} (Structured JSON)", expanded=False):
+                        st.json(llm_response)
+
+                # Parse JSON decisions
                 col_decisions = parse_llm_decisions_single_col_json(
                     llm_response=llm_response,
                     valid_indices=valid_indices,
                     debug=debug
                 )
+
             except Exception as e:
-                st.error(f"Failed to parse LLM response for Column '{col}', Chunk {chunk_idx}: {e}")
-                if debug:
-                    st.write("LLM response causing the issue:")
-                    st.code(llm_response, language="json")
+                error_message = f"Failed to parse LLM response for Column '{col}', Chunk {chunk_idx}: {e}"
+                st.error(error_message)
+                logging.error(error_message)
+
+                st.json(llm_response)  # Always show the raw JSON response
                 continue
 
             # Debug: Show parsed decisions
@@ -263,6 +266,7 @@ def filter_df_via_llm_per_column(
         progress_bar.progress(chunks_done / total_chunks)
 
     return decisions_per_column
+
 
 
 
