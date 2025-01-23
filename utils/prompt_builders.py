@@ -124,8 +124,8 @@ def build_llm_prompt_single_col_json(
     You will be given a series of row texts (one for each row). For each row:
     1) Compare the text to the following filter concepts (broadly and creatively):  
     {', '.join(keywords)}
-    2) Decide whether this row **thematically matches** (i.e., is relevant to) **any** of these concepts. 
-    - If it matches (even loosely or by synonyms/associated ideas), label this row "KEEP."
+    2) Decide whether this row matches within reason (i.e., is relevant to) **any** of these concepts. 
+    - If it matches (by synonyms/associated ideas), label this row "KEEP."
     - Otherwise, label it "EXCLUDE."
     """
     

@@ -95,9 +95,12 @@ def delete_saved_filter_from_supabase(supabase_client, filter_id):
     """Deletes a saved filter from Supabase."""
     try:
         response = supabase_client.table("saved_filters").delete().eq("id", filter_id).execute()
-        # Removed incorrect if response.error check
-        st.success("Filter deleted successfully.") # Success message now directly in try block
-        return True
+        if response.error:
+            st.error(f"Error deleting saved filter: {response.error.message}")
+            return False
+        else:
+            st.success("Filter deleted successfully.")
+            return True
     except Exception as e:
         st.error(f"Error deleting saved filter: {e}")
         return False
@@ -142,8 +145,11 @@ def record_filter_history_to_supabase(supabase_client, user_id, filter_params_di
             "original_csv_filename": original_filename,
             "filtered_csv_url": filtered_csv_url # Store the URL in the history
         }).execute()
-        # Removed incorrect if response.error check - no success message here as it's a background task
-        return True
+        if response.error:
+            st.error(f"Error recording filter history in DB: {response.error.message}")
+            return False
+        else:
+            return True
     except Exception as e:
         st.error(f"Error recording filter history in DB: {e}")
         return False
@@ -153,8 +159,11 @@ def load_filter_history_from_supabase(supabase_client, user_id):
     """Loads filter history for a user from Supabase."""
     try:
         response = supabase_client.table("filter_history").select("*").eq("user_id", user_id).order("timestamp", desc=True).execute() # Order by timestamp
-        # Removed incorrect if response.error check
-        return response.data
+        if response.error:
+            st.error(f"Error loading filter history: {response.error.message}")
+            return []
+        else:
+            return response.data
     except Exception as e:
         st.error(f"Error loading filter history: {e}")
         return []
@@ -327,40 +336,21 @@ def filter_tool():
 
     elif st.session_state.filter_step == 2:
         st.subheader("Column Selection")
-        if 'filter_df' in st.session_state:  # Check if filter_df exists in session state
-            all_columns = st.session_state.filter_df.columns.tolist()
+        all_columns = st.session_state.filter_df.columns.tolist()
+        st.session_state.filter_selected_columns = st.multiselect("Pick one or more columns to filter on:", all_columns)
 
-            # --- THE FIX IS HERE ---
-            default_columns = st.session_state.get("filter_selected_columns", [])
-            selected_columns = st.multiselect(
-                "Pick one or more columns to filter on:",
-                all_columns,
-                default=default_columns,  # Use 'default' to pre-select
-                key="filter_multiselect_step2"  # Important: Add a key here!
-            )
-            st.session_state.filter_selected_columns = selected_columns # Update the session state
-
-            # --- ---------------- ---
-
-            col1, col2, col3 = st.columns([1,1,1])
-            with col1:
-                if st.button("Back", key="filter_back_button_step2"):
-                    st.session_state.filter_step = 1
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Back", key="filter_back_button_step2"): # Added key
+                st.session_state.filter_step = 1
+                st.rerun()
+        with col2:
+            if st.button("Next", key="filter_next_button_step2"): # Added key
+                if st.session_state.filter_selected_columns:
+                    st.session_state.filter_step = 3
                     st.rerun()
-            with col2:
-                if st.button("Reset Filter", key="filter_reset_button_step2"): # Reset button
-                    reset_filter_parameters()
-                    st.session_state.filter_step = 1  # Go back to step 1 after reset. Change if different reset behaviour is needed
-                    st.rerun()
-            with col3:
-                if st.button("Next", key="filter_next_button_step2"):
-                    if st.session_state.filter_selected_columns:
-                        st.session_state.filter_step = 3
-                        st.rerun()
-                    else:
-                        st.warning("Please select at least one column.")
-        else:
-            st.warning("Please upload a CSV file first.") # Handle case where no file is uploaded yetlect at least one column.")
+                else:
+                    st.warning("Please select at least one column.")
 
 
     elif st.session_state.filter_step == 3:
@@ -375,17 +365,12 @@ def filter_tool():
             )
 
 
-        col1, col2, col3 = st.columns([1,1,1])
+        col1, col2 = st.columns(2)
         with col1:
             if st.button("Back", key="filter_back_button_step3"): # Added key
                 st.session_state.filter_step = 2
                 st.rerun()
         with col2:
-            if st.button("Reset Filter", key="filter_reset_button_step3"): # Reset button
-                reset_filter_parameters()
-                st.session_state.filter_step = 1  # Go back to step 1 after reset. Change if different reset behaviour is needed
-                st.rerun()
-        with col3:
             if st.button("Next", key="filter_next_button_step3"): # Added key
                 if all(st.session_state.filter_column_keywords.get(col) is not None for col in st.session_state.filter_selected_columns):
                     st.session_state.filter_step = 4
@@ -428,17 +413,12 @@ def filter_tool():
             """,unsafe_allow_html=True
         )
 
-        col1, col2, col3 = st.columns([1,1,1])
+        col1, col2 = st.columns(2)
         with col1:
             if st.button("Back", key="filter_back_button_step4"): # Added key
                 st.session_state.filter_step = 3
                 st.rerun()
         with col2:
-            if st.button("Reset Filter", key="filter_reset_button_step4"): # Reset button
-                reset_filter_parameters()
-                st.session_state.filter_step = 1  # Go back to step 1 after reset. Change if different reset behaviour is needed
-                st.rerun()
-        with col3:
 
             if st.button("Next", key="filter_next_button_step4"): # Added key
                 st.session_state.filter_step = 5
@@ -459,17 +439,12 @@ def filter_tool():
             "Conceptual Reasoning Strictness (1=Very Strict, 5=Very Broad)", 1, 5, 5
         )
 
-        col1, col2, col3 = st.columns([1,1,1])
+        col1, col2 = st.columns(2)
         with col1:
             if st.button("Back", key="filter_back_button_step5"): # Added key
                 st.session_state.filter_step = 4
                 st.rerun()
         with col2:
-            if st.button("Reset Filter", key="filter_reset_button_step5"): # Reset button
-                reset_filter_parameters()
-                st.session_state.filter_step = 1  # Go back to step 1 after reset. Change if different reset behaviour is needed
-                st.rerun()
-        with col3:
             if st.button("Next", key="filter_next_button_step5"): # Added key
                 st.session_state.filter_step = 6
                 st.rerun()
@@ -494,17 +469,13 @@ def filter_tool():
             st.info("Using fuzzy pre-filter with threshold=85 to remove obvious matches before LLM filtering.")
 
 
-        col1, col2, col3 = st.columns([1,1,1])
+        col1, col2 = st.columns(2)
         with col1:
             if st.button("Back", key="filter_back_button_step6"): # Added key
                 st.session_state.filter_step = 5
                 st.rerun()
+
         with col2:
-            if st.button("Reset Filter", key="filter_reset_button_step6"): # Reset button
-                reset_filter_parameters()
-                st.session_state.filter_step = 1  # Go back to step 1 after reset. Change if different reset behaviour is needed
-                st.rerun()
-        with col3:
             if st.button("Next", key="filter_next_button_step6"): # Added key
                 st.session_state.filter_step = 7
                 st.rerun()
@@ -580,17 +551,13 @@ def filter_tool():
                 st.session_state.filter_step = 8
                 st.rerun()
 
-        col1, col2= st.columns(2)
+        col1, col2 = st.columns(2)
         with col1:
 
             if st.button("Back", key="filter_back_button_step7"): # Added key
                 st.session_state.filter_step = 6
                 st.rerun()
-        with col2:
-            if st.button("Reset Filter", key="filter_reset_button_step7"): # Reset button
-                reset_filter_parameters()
-                st.session_state.filter_step = 1  # Go back to step 1 after reset. Change if different reset behaviour is needed
-                st.rerun()
+
 
 
     elif st.session_state.filter_step == 8:
@@ -679,7 +646,10 @@ def main():
         # Initialize which page to show
         if "show_filter_tool" not in st.session_state:
             st.session_state.show_filter_tool = True
-       
+        if "show_compare_tool" not in st.session_state:
+            st.session_state.show_compare_tool = False
+        if "show_calculator_tool" not in st.session_state:
+            st.session_state.show_calculator_tool = False
 
         with st.sidebar:
             st.image("wyspur.png", use_container_width=True)
@@ -687,8 +657,21 @@ def main():
 
             if st.button("AI Filter Tool", key="sidebar_filter_tool_button"): # Added key
                 st.session_state.show_filter_tool = True
+                st.session_state.show_compare_tool = False
+                st.session_state.show_calculator_tool = False
                 st.session_state.pop('filter_step', None) # Reset filter steps
 
+            if st.button("Compare Files", key="sidebar_compare_files_button"): # Added key
+                st.session_state.show_filter_tool = False
+                st.session_state.show_compare_tool = True
+                st.session_state.show_calculator_tool = False
+                st.session_state.pop('compare_step', None) # Reset compare steps
+
+            if st.button("Calculator", key="sidebar_calculator_button"): # Added key
+                st.session_state.show_filter_tool = False
+                st.session_state.show_compare_tool = False
+                st.session_state.show_calculator_tool = True
+                st.session_state.pop('calc_step', None) # Reset calculator steps
 
             # Display user info and logout button (only when logged in)
             if 'user' in st.session_state: # Check if user exists in session_state
@@ -701,20 +684,23 @@ def main():
                     del st.session_state.user
                 st.rerun()
 
-        tab_names = ["CSV Filter", "Saved Filters", "Filter History"]
-        tab1, tab2, tab3 = st.tabs(tab_names) 
+        # Tabs for different functionalities
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["CSV Filter", "Compare Files", "Calculator", "Saved Filters", "Filter History"]) # Add "Saved Filters" tab
 
-        with tab1: 
+        with tab1: # "CSV Filter" tab
             filter_tool()
-        with tab2:
-            saved_filters_tab_content()
-        with tab3: 
-            filter_history_tab_content()
-       
+        with tab2: # "Compare Files" tab
+            compare_tool()
+        with tab3: # "Calculator" tab
+            calculator_tool()
+        with tab4: # "Saved Filters" tab
+            saved_filters_tab_content() # Function to handle saved filters tab content
+        with tab5: # "Filter History" tab
+            filter_history_tab_content() # Function for history tab content
 
 def filter_history_tab_content():
     """Content for the Filter History tab."""
-    st.header("Filtered CSV History")
+    st.header("Filter History")
     current_user = st.session_state.user
     if current_user:
         user_id = current_user.id
@@ -739,7 +725,7 @@ def filter_history_tab_content():
 
 def saved_filters_tab_content():
     """Content for the Saved Filters tab."""
-    st.header("Filter Name")
+    st.header("Saved Filters")
     current_user = st.session_state.user
     if current_user:
         user_id = current_user.id
@@ -749,14 +735,14 @@ def saved_filters_tab_content():
             for filter_data in saved_filters:
                 col1, col2, col3 = st.columns([3, 1, 1]) # Example layout for each saved filter
                 with col1:
-                    st.write(filter_data['filter_name'])
+                    st.subheader(filter_data['filter_name'])
                     # Optionally display some filter parameters summary here if needed
                 with col2:
                     if st.button("Apply Filter", key=f"apply_filter_button_{filter_data['id']}"): # Added key - unique per filter
                         # Load filter_data['filter_parameters'] and populate UI
                         filter_params = json.loads(filter_data['filter_parameters'])
                         apply_saved_filter_to_ui(filter_params) # Function to apply to UI (see next step)
-                        
+                        st.switch_to_tab("CSV Filter") # Switch to the main filter tab (adjust tab name if needed)
                 with col3:
                     if st.button("Delete", key=f"delete_filter_button_{filter_data['id']}"): # Added key - unique per filter
                         if delete_saved_filter_from_supabase(supabase, filter_data['id']):
@@ -781,24 +767,11 @@ def apply_saved_filter_to_ui(filter_params):
     # You might need to also set the text input values for keywords.
     # Since the UI is built step by step, setting session state should trigger UI updates on rerun.
     st.session_state.show_filter_tool = True # Ensure filter tool is shown if not already   
-    st.info("Saved filter parameters applied! Go to the 'CSV Filter' tab to use them.") # ADD SUCCESS MESSAGE
 
-def reset_filter_parameters():
-    """Resets all filter parameters in session state."""
-    st.session_state.filter_selected_columns = []
-    st.session_state.filter_column_keywords = {}
-    st.session_state.filter_conceptual_slider = 5  # Reset to default value
-    st.session_state.filter_chunk_size = 400  # Reset to default value
-    st.session_state.filter_temperature = 0.0  # Reset to default value
-    st.session_state.filter_selected_model = DEFAULT_MODEL  # Reset to default model
-    st.session_state.filter_apply_fuzzy = False  # Reset to default value
-    # Reset any other filter-related session state variables
 
-    # If you're using the saved_filter_applied flag, reset it as well:
-    st.session_state.saved_filter_applied = False
 
-    st.info("Filter parameters reset!") # Confirmation message
-    
+    # Decide which tool to show: - Removed redundant tool selection and sidebar/logout buttons from here
+    # These should only be in the main() function to avoid duplication and potential conflicts.
 
 
 if __name__ == "__main__":
