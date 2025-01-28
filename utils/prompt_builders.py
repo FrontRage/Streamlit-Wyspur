@@ -34,70 +34,28 @@ def build_conceptual_text(slider_value: int) -> str:
     if slider_value == 1:
         # LEVEL 1: STRICT - CONCEPTUAL REASONING (3-LEVEL SLIDER)
         return """
-        LEVEL: STRICT - CONCEPTUAL FILTERING
-
-        • Keep rows ONLY if they EXACTLY match the user’s keywords or a well-known,
-          direct synonym.
-        • Slight rewordings, minor variations, or related (but not identical) terms
-          should NOT be kept.
-        • Abbreviations are kept only if they are definitively the same concept
-          (e.g., “CEO” vs. “C.E.O.”).
-        • Location matching is applied strictly: keep ONLY if the column has an
-          exact match to the country (or a universally recognized abbreviation).
-          For instance, if “USA” is excluded, only exclude rows listing “USA” or
-          “U.S.A.”, not a city in the USA unless it explicitly says “USA.”
-        • If uncertain whether a term qualifies as an exact match or direct synonym,
-          exclude the row (do NOT keep).
+        **LEVEL: STRICT - CONCEPTUAL FILTERING MODIFIER**
+        - Apply a strict interpretation of the keywords, **only** keeping exact matches and direct synonyms.
         """
 
     elif slider_value == 3:
         # LEVEL 3: BROAD - CONCEPTUAL FILTERING (3-LEVEL SLIDER) - NUMERIC RANGE INSTRUCTIONS UPDATED (OPTION 1)
         return """
-        **LEVEL: BROAD - CONCEPTUAL FILTERING**
-
-        • Use **synonyms, abbreviations**, or spelled-out forms:
-        - E.g. "CEO" → "Chief Executive Officer," "CEOs," "C.E.O." "VP" → "Vice President," "Senior VP," "V.P."
-        - If "VP of sales" is provided, Keep "SVP of Sales" or variations of that tile, but not a "VP of Product" as this title works in a different department.
-        • If the column references **locations** (e.g., "USA"), consider any **cities** or **regions** in that country as relevant.
-        • For numeric **employee count ranges** (e.g., "11 - 200 employees"):  **Keep rows if the listed employee count range *overlaps or falls within* the user-provided range.**
-            - Examples: If user provides "11 - 200", keep "50-200", "100-200", "11-100", "11-500", "150", but exclude "1-10", "300-500", "5".
-        • For partial overlaps in text (e.g., "CEOs" vs. "oceans"), assume it’s relevant if the overlap is plausible; if ambiguous, **EXCLUDE**.
-        • If you see *any* conceptual link—synonym, slight rewording,label it "KEEP."
-        • If you are truly sure it doesn’t match any concept, "EXCLUDE."
+       **LEVEL: BROAD - CONCEPTUAL FILTERING MODIFIER**
+       -  Apply a broad interpretation of the keywords, and keep any text that shows a plausible conceptual link.
         """
     else: # slider_value == 2: MODERATE - CONCEPTUAL REASONING (3-LEVEL SLIDER) - NUMERIC RANGE INSTRUCTIONS UPDATED (OPTION 1)
         return f"""
-        LEVEL: MODERATE - CONCEPTUAL FILTERING
-
-        • Keep rows if they match or strongly relate to the user’s filter concepts.
-        • Allow minor or faint references to remain; do NOT keep unless there is
-          a clear, direct, or strong thematic connection.
-        • Synonyms and abbreviations:
-            - Keep if the synonym/abbreviation is well-known or commonly used.
-            - If it is a subtle or obscure reference, do not keep.
-        • Location handling:
-            - If a country (or its standard abbreviation) is filtered, keep rows
-              listing major cities of that country (e.g., if “USA” is metioned as keyword,
-              Keep “New York,” “NY,” “Los Angeles,” “LA,” etc.).
-            - For less obvious or ambiguous city references, only keep if you
-              are certain they belong to the provided keyword country.
-        • Contextual references:
-            - If the row strongly implies the filtered concept, keep it.
-            - If the connection is extremely tenuous or purely coincidental,
-              exclude the row.
-        • In cases of doubt, lean towards excluding the row (i.e., do NOT keep
-          unless it is fairly certain to be related).
-          • For numeric **employee count ranges** (e.g., "11 - 200 employees"):  **Keep rows if the listed employee count range *overlaps or falls within* the user-provided range.**
-            - Examples: If user provides "11 - 200", keep "50-200", "100-200", "11-100", "11-500", "150", but exclude "1-10", "300-500", "5".
+        **LEVEL: MODERATE - CONCEPTUAL FILTERING MODIFIER**
+        - Apply a moderate interpretation of the keywords, and keep any text that has a clear connection with the keywords.
         """
-
 
 def build_llm_prompt_single_col_json(
     row_summaries: list,
     column_name: str,
     keywords: list,
     reasoning_text: str,
-    user_context: str = "" # <--- NEW: Added user_context parameter with default ""
+    user_context: str = ""
 ) -> str:
     """
     BUILD A JSON-BASED PROMPT FOR ONE COLUMN (Column-Specific & with User Context)
@@ -110,37 +68,59 @@ def build_llm_prompt_single_col_json(
     """
     system_instructions = f"""
     You are a highly specialized AI filter, designed for **conceptual reasoning on spreadsheet data, one column at a time.**
-    You are now focusing EXCLUSIVELY on the **"{column_name}" column**. 
+    You are now focusing EXCLUSIVELY on the **"{column_name}" column**.
     Your goal is to filter rows based on whether the **"{column_name}" values** conceptually relate to user-provided keywords.
 
     **Detailed Context for "{column_name}" Column Analysis**:
     - You are examining entries specifically within the **"{column_name}" column** of a spreadsheet.
-    - Understand that spreadsheet columns can contain various types of textual data.
-    - Apply broad, conceptual reasoning to identify matches, considering synonyms, related concepts, and variations typical for **textual data in spreadsheet columns.**
+    - Understand that spreadsheet columns can contain various types of textual data, numbers, or locations.
+    - Apply broad, conceptual reasoning to identify matches, considering synonyms, related concepts, and variations typical for **data in spreadsheet columns.**
 
     **Filter Keywords for "{column_name}"**:
-    The user wants to filter (keep) rows that are conceptually related to these concepts:
+    The user wants to filter (keep) rows that are conceptually related to *any* of these concepts:
     {', '.join(keywords)}
 
-    **Your Task (Column-Specific Conceptual Filtering)**:
-    For each row, analyze the **"{column_name}" value** and decide:
-    1) Does it conceptually relate to *any* of the provided filter concepts for the **"{column_name}" column**?
-       * Consider the general context of textual data in spreadsheet columns.
-       * Use synonyms, abbreviations, and related terms.
-       * Apply the conceptual reasoning guidelines provided below (in 'Reasoning Text').
-    2) Based on your conceptual understanding, label each row as:
-       - "KEEP": If the **"{column_name}" value** is conceptually relevant to the keywords.
-       - "EXCLUDE": If the **"{column_name}" value** is NOT conceptually relevant.
+    **IMPORTANT: Prioritize User-Provided Context**
+    - The following user-provided context is **paramount**. You must prioritize it above all other instructions and keywords. If the user context contradicts any other instruction, **follow the user context instruction**.
 
-    Remember, you are filtering rows based on conceptual relevance to keywords **specifically within the "{column_name}" column.** 
     """
-
-    if user_context: # <--- NEW: Include User Context in instructions if provided
+    if user_context:
         system_instructions += f"""
 
     **Additional User-Provided Context/Instructions for "{column_name}" Filtering:**
-    {user_context} 
-        """
+    {user_context}
+
+    **Instructions for Inclusion/Exclusion**:
+    - **Keep** rows that are related to the keywords and the user-provided context unless there is a clear contradiction.
+    - **Exclude** rows if they clearly and directly contradict both the keywords and the user-provided context.
+    - If a title includes words that directly contradict the user context, or has characteristics from a role that is explicitly defined as undesirable in the context, then it **MUST** be excluded.
+    - For example, if the user context specifies to only keep "Marketing" titles, exclude titles containing "Sales" or "Business Development" keywords and vice versa.
+    - **Do not** include roles that are outside the specified user context, even if it contains keywords that match.
+    - **Do not** exclude roles that align with the specified user context, even if they do not match the keywords directly.
+     - When in doubt, if the text has a plausible link with the context, then keep it.
+    """
+    else:
+        system_instructions += f"""
+    **Instructions for Inclusion/Exclusion**:
+        - When no user context is provided, **keep** rows that conceptually match the provided keywords.
+        - When no user context is provided, **exclude** rows that do not clearly relate to the provided keywords.
+        - In cases of doubt, lean towards keeping the row (i.e., do NOT exclude unless it is fairly certain to be unrelated).
+    """
+
+
+    system_instructions += f"""
+    **Your Task (Column-Specific Conceptual Filtering)**:
+    For each row, analyze the **"{column_name}" value** and decide:
+        1) Does it conceptually relate to *any* of the provided filter concepts for the **"{column_name}" column** AND aligns with the provided user context (if any)?
+       * Consider the general context of data in spreadsheet columns.
+       * Use synonyms, abbreviations, and related terms, **but only if it aligns with the user-provided context (if any)**.
+       * Apply the conceptual reasoning guidelines provided below (in 'Reasoning Text').
+       2) Based on your conceptual understanding AND the user-provided context (if any), label each row as:
+       - "KEEP": If the **"{column_name}" value** is conceptually relevant to the keywords AND aligns with the user context (if any), unless there is a clear contradiction.
+       - "EXCLUDE": If the **"{column_name}" value** is clearly NOT conceptually relevant to the keywords, or directly contradicts the user context (if any).
+
+    Remember, you are filtering rows based on conceptual relevance to keywords **specifically within the "{column_name}" column** AND with the **user-provided context as the most important factor (if any).**
+    """
 
     summaries_text = "\n".join(row_summaries)
 
