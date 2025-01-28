@@ -1,12 +1,15 @@
 import streamlit as st
+from streamlit_lottie import st_lottie
 # Set page config for wider layout and custom font (optional)
-st.set_page_config(layout="centered", page_title="Smart Filtering App")
+import streamlit.components.v1 as components
+st.set_page_config(layout="centered", page_title="wysper Ai")
 
 import pandas as pd
 from io import BytesIO
 import json
 import datetime
 import io
+import time
 
 # Import modules for tools
 from modules.fuzzy_logic import python_pre_filter_fuzzy
@@ -20,15 +23,10 @@ from modules.filter_logic import filter_df_master
 from supabase import Client, create_client
 import os
 
-# Font styling
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Source+Code+Pro&display=swap');
-body {
-    font-family: 'Source Code Pro', monospace;
-}
-</style>
-""", unsafe_allow_html=True)
+# ------------------------------
+# Streamlit CSS custimization
+# ------------------------------
+
 
 # ------------------------------
 # SUPABASE AUTHENTICATION
@@ -160,6 +158,20 @@ def load_filter_history_from_supabase(supabase_client, user_id):
         return []
 
 # ------------------------------
+# HELPER FUNCTIONS FOR Lottie Animation
+# ------------------------------
+
+def stream_greeting_message(username): # Function to stream greeting text WITH <br> for line breaks
+    greeting = f"""Hello, {username}!<br>"""  # Use <br> for line break after "Hello, username!"
+    greeting += """Ready to unleash the power of AI to filter your CSV data?<br>""" # <br> after the question
+    greeting += """Let's get started!🚀<br>""" # <br> after "Let's get started!"
+    greeting += """Step 1. Upload your CSV file below.""" # No <br> at the very end if you don't want extra space
+
+    for word in greeting.split(" "):
+        yield word + " "
+        time.sleep(0.07) # Adjust speed as needed
+
+# ------------------------------
 # HELPER FUNCTIONS FOR COMPARISON
 # ------------------------------
 
@@ -177,142 +189,146 @@ def shorten_sheet_name(filename, prefix="Non_Matches_"):
     return sheet_name[:31]
 
 # ------------------------------
+# Streamlit Custom Components width: 100%;  /* Optional: Make buttons full width */
+# ------------------------------
+
+def load_lottiefile(filepath: str):
+    with open(filepath, "r") as f:
+        return json.load(f)
+
+# ------------------------------
 # MAIN TOOLS
 # ------------------------------
 
-def compare_tool():
-    """Compare Files Tool UI logic with step-by-step approach."""
-    st.title("Compare Two Files by ProfileId")
-
-    if "compare_step" not in st.session_state:
-        st.session_state.compare_step = 1
-
-    if st.session_state.compare_step == 1:
-        st.session_state.compare_col_name = st.text_input("Enter the column name to match on", "ProfileId")
-        st.session_state.compare_file1 = st.file_uploader("Upload first file", type=["csv", "xlsx", "xls"])
-        if st.session_state.compare_file1:
-            st.session_state.compare_step = 2
-            st.rerun()
-
-    elif st.session_state.compare_step == 2:
-        st.session_state.compare_file2 = st.file_uploader("Upload second file", type=["csv", "xlsx", "xls"])
-        if st.session_state.compare_file2:
-            try:
-                df1 = read_file(st.session_state.compare_file1)
-                df2 = read_file(st.session_state.compare_file2)
-
-                col_name = st.session_state.compare_col_name
-                if col_name not in df1.columns or col_name not in df2.columns:
-                    st.error(f"Column '{col_name}' not found in one or both files.")
-                    st.session_state.compare_step = 1
-                    st.rerun()
-                    return
-
-                df1[col_name] = df1[col_name].astype(str)
-                df2[col_name] = df2[col_name].astype(str)
-
-                matching_ids = set(df1[col_name]) & set(df2[col_name])
-
-                st.session_state.compare_df_matches = df1[df1[col_name].isin(matching_ids)].copy()
-                st.session_state.compare_df_non_matches_file1 = df1[~df1[col_name].isin(matching_ids)].copy()
-                st.session_state.compare_df_non_matches_file2 = df2[~df2[col_name].isin(matching_ids)].copy()
-
-                st.session_state.compare_step = 3
-                st.rerun()
-
-            except Exception as e:
-                st.error(f"An error occurred: {e}")
-                st.session_state.compare_step = 1
-                st.rerun()
-
-    elif st.session_state.compare_step == 3:
-        if 'compare_df_matches' in st.session_state:
-            st.subheader("Preview: Matches (from first file)")
-            st.write(st.session_state.compare_df_matches.head())
-
-            st.subheader(f"Preview: Non Matches in {st.session_state.compare_file1.name}")
-            st.write(st.session_state.compare_df_non_matches_file1.head())
-
-            st.subheader(f"Preview: Non Matches in {st.session_state.compare_file2.name}")
-            st.write(st.session_state.compare_df_non_matches_file2.head())
-
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                st.session_state.compare_df_matches.to_excel(writer, index=False, sheet_name='Matches')
-
-                file1_sheet_name = shorten_sheet_name(st.session_state.compare_file1.name)
-                st.session_state.compare_df_non_matches_file1.to_excel(writer, index=False, sheet_name=file1_sheet_name)
-
-                file2_sheet_name = shorten_sheet_name(st.session_state.compare_file2.name)
-                st.session_state.compare_df_non_matches_file2.to_excel(writer, index=False, sheet_name=file2_sheet_name)
-
-            st.download_button(
-                label="Download Comparison Results",
-                data=output.getvalue(),
-                file_name="comparison_result.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="compare_download_button" # Added key
-            )
-
-        if st.button("Back to Upload Files", key="compare_back_to_upload_button"): # Added key
-            st.session_state.compare_step = 1
-            st.rerun()
-
-
-def calculator_tool():
-    """Calculator tool UI logic with step-by-step approach."""
-    st.header("Calculator")
-
-    if "calc_step" not in st.session_state:
-        st.session_state.calc_step = 1
-
-    if st.session_state.calc_step == 1:
-        st.session_state.calc_num1 = st.number_input("Enter first number", value=0.0, format="%.2f")
-        if st.button("Next", key="calc_next_button_step1"): # Added key
-            st.session_state.calc_step = 2
-            st.rerun()
-
-    elif st.session_state.calc_step == 2:
-        st.session_state.calc_num2 = st.number_input("Enter second number", value=0.0, format="%.2f")
-        st.session_state.calc_operation = st.selectbox("Select operation", ["Add", "Subtract", "Multiply", "Divide"])
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Back", key="calc_back_button_step2"): # Added key
-                st.session_state.calc_step = 1
-                st.rerun()
-        with col2:
-            if st.button("Calculate", key="calc_calculate_button_step2"): # Added key
-                st.session_state.calc_step = 3
-                st.rerun()
-
-    elif st.session_state.calc_step == 3:
-        num1 = st.session_state.calc_num1
-        num2 = st.session_state.calc_num2
-        operation = st.session_state.calc_operation
-
-        if operation == "Add":
-            result = num1 + num2
-        elif operation == "Subtract":
-            result = num1 - num2
-        elif operation == "Multiply":
-            result = num1 * num2
-        elif operation == "Divide":
-            result = num1 / num2 if num2 != 0 else "Error: Division by zero"
-
-        st.write(f"Result: {result}")
-        if st.button("Start Over", key="calc_start_over_button_step3"): # Added key
-            st.session_state.calc_step = 1
-            st.rerun()
 
 
 def filter_tool():
+
     """Filter tool UI logic with step-by-step approach."""
+
 
     if "filter_step" not in st.session_state:
         st.session_state.filter_step = 1
+    if "step1_initialized" not in st.session_state: # Initialize session state for step 1 load tracking
+        st.session_state.step1_initialized = False
 
     if st.session_state.filter_step == 1:
-        st.title("Smart filtering powered by WyspurAI")
+
+        step1_col1, step1_col2, step1_col3 = st.columns([1, 3, 1]) # Create 3 columns
+
+        with step1_col1:
+            # Inject CSS to left content in the left column (for animation)
+            st.markdown(
+                    """
+                    <style>
+                        .stColumn:nth-child(2) { /* Target the second stColumn within stHorizontalBlock (adjust index if needed) */
+                            background-color: #e6f7ff; /* Light blue bubble background */
+                            border: 2px solid #91bfdb; /* Blue border */
+                            border-radius: 15px;
+                            padding: 15px;
+                            margin-bottom: 10px;
+                            text-align: left; /* Keep text alignment left within the bubble */
+                            display: inline-block; /* To make bubble wrap content */
+                            vertical-align: top; /* Align bubble to the top of the column */
+                        }
+                        .stColumn:nth-child(3) p { /* Style paragraph text INSIDE the bubble */
+                            margin: 0;
+                            word-wrap: break-word;
+                        }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            # Middle column - Lottie Animation
+            lottie_filepath = "lottie/wyspur_lottie.json" # Replace with your file path
+            lottie_json = load_lottiefile(lottie_filepath)
+
+            if lottie_json:
+                st_lottie(
+                    lottie_json,
+                    speed=0.1,
+                    reverse=False,
+                    loop=True,
+                    quality="high",
+                    height=300 / 2,
+                    width=300 / 2,
+                    key=None,
+                )
+            else:
+                st.error(f"Failed to load Lottie animation from file: {lottie_filepath}")
+        
+
+        with step1_col2:
+            # Middle column - Greeting Text (Chat Bubble Style - Font Change AND Error Fix - CORRECTED)
+            user = st.session_state.user
+
+            if not st.session_state.step1_initialized:
+                time.sleep(0.0)
+
+                # Inject CSS for chat bubble using st.markdown (targeting column 2 now) - FONT CHANGE and other styles
+                st.markdown(
+                    """
+                    <style>
+                        .stColumn:nth-child(2) { /* Target the SECOND stColumn within stHorizontalBlock */
+                            background-color: #e6f7ff;
+                            border: 2px solid #91bfdb;
+                            border-radius: 15px;
+                            padding: 8px; /* Reduced padding */
+                            margin-bottom: 10px;
+                            text-align: left;
+                            display: inline-block;
+                            vertical-align: top;
+                        }
+                        .chat-bubble-text-js { /* Class for text INSIDE the bubble - FONT CHANGED */
+                            margin: 0;
+                            word-wrap: break-word;
+                            white-space: pre-line;
+                            font-family: 'Courier New', monospace; /* Font changed to Courier New, monospace */
+                        }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                greeting_text_full = stream_greeting_message(user.email.split('@')[0]) # Get greeting text from Python function
+
+                # Use st.components.v1.html to inject chat bubble and JavaScript streaming (in column 2)
+                components.html(
+                    f"""
+                    <div class="chat-bubble">
+                        <p class="chat-bubble-text-js" id="chat-bubble-text-area"></p>  <!-- Target for JS streaming -->
+                    </div>
+
+                    <script>
+                        function streamText(text, elementId) {{
+                            let words = text.split(' ');
+                            let index = 0;
+                            let intervalId = setInterval(() => {{
+                                if (index < words.length) {{
+                                    document.getElementById(elementId).innerHTML += words[index] + ' ';
+                                    index++;
+                                }} else {{
+                                    clearInterval(intervalId);
+                                }}
+                            }}, 70); // Adjust speed as needed
+                        }}
+
+                        let greeting = `{ "".join(stream_greeting_message(user.email.split('@')[0])) }`; // <-----  CRITICAL LINE: Pass the FUNCTION'S OUTPUT as a STRING
+                        streamText(greeting, 'chat-bubble-text-area'); // Call JS streaming function
+                    </script>
+                    """,
+                    height=100, # Adjust height as needed
+                    scrolling=False,
+                )
+
+
+                st.session_state.step1_initialized = True # Mark step 1 as initialized
+            
+      
+
+        with step1_col3:
+            # Right most column - Spacer (can be empty or minimal content)
+            pass  
 
         st.session_state.filter_uploaded_file = st.file_uploader("Upload a CSV file to filter", type=["csv"])
         if st.session_state.filter_uploaded_file:
@@ -359,6 +375,7 @@ def filter_tool():
                         st.rerun()
                     else:
                         st.warning("Please select at least one column.")
+
         else:
             st.warning("Please upload a CSV file first.") # Handle case where no file is uploaded yetlect at least one column.")
 
@@ -411,22 +428,6 @@ def filter_tool():
             help="Fewer rows per chunk reduces prompt size, but increases the number of LLM calls."
         )
 
-        st.markdown(
-            """
-            <style>
-                div[data-testid="column"]:nth-of-type(1)
-                {
-                    border:1px solid red;
-                } 
-
-                div[data-testid="column"]:nth-of-type(2)
-                {
-                    border:1px solid blue;
-                    text-align: end;
-                } 
-            </style>
-            """,unsafe_allow_html=True
-        )
 
         col1, col2, col3 = st.columns([1,1,1])
         with col1:
@@ -551,7 +552,7 @@ def filter_tool():
             filtered_df_col = filter_df_master(
                 df=df_for_filtering,
                 columns_to_check=st.session_state.filter_selected_columns,
-                column_keywords={k: [v] if isinstance(v, str) else v.split(',') for k, v in st.session_state.filter_column_keywords.items()},
+                filter_column_config=st.session_state.filter_column_config, # <--- DIRECTLY PASS filter_column_config
                 chunk_size=st.session_state.filter_chunk_size,
                 reasoning_text=conceptual_instructions,
                 model=st.session_state.filter_selected_model,
@@ -624,6 +625,7 @@ def filter_tool():
             )
         if st.button("Start Over", key="filter_start_over_button_step8"): # Added key
             st.session_state.filter_step = 1
+            st.session_state.step1_initialized = False # Reset step 1 initialization flag
             st.rerun()
 
 
@@ -633,22 +635,78 @@ def filter_tool():
 # ------------------------------
 
 
-def login_signup_page():  # Make sure this function is defined
+import streamlit as st
+
+def login_signup_page():
+    # --- Example: minimal custom CSS for centering ---
+    st.markdown(
+        """
+        <style>
+         /* --- Login/Signup Button Styling - Kept from Iteration 4/5 (Pinker Colors & Size) --- */
+        div.stButton > button:first-child,
+        div.stButton > button:nth-of-type(2) {
+            background: linear-gradient(to right, #F770B7, #D546A2); /* Pinker Wyspur Gradient */
+            color: white;
+            border: none;
+            border-radius: 25px;
+            padding: 0.5em 1.2em;
+            font-weight: bold;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+            transition: background-color 0.3s ease;
+            display: inline-block;
+            width: auto;
+            min-width: 85px;
+            height: auto;
+            min-height: 36px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 0.9rem;
+        }
+
+        div.stButton > button:first-child:hover,
+        div.stButton > button:nth-of-type(2):hover {
+            background: linear-gradient(to right, #FF99CC, #F066B3); /* Lighter pink hover gradient */
+        }
+
+        /* Center almost everything inside a 'centered' container */
+        .centered {
+            display: flex;
+            flex-direction: column;
+            align-items: center;  /* horizontal centering */
+            justify-content: center;  /* vertical centering if needed */
+            text-align: center;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # Create an overall empty container so we can control layout
     placeholder = st.empty()
-
     with placeholder.container():
-        st.image("wyspur.png", width=200)
-        st.title("Login/Sign Up")
 
-        email = st.text_input("Email")
-        password = st.text_input("Password", type="password")
+        # Use three columns and drop the content into the middle column
+        # so that the logo and title appear centered.
+        top_col1, top_col2, top_col3 = st.columns([1,2,1])
+        with top_col2:
+            st.markdown("<div class='centered'>", unsafe_allow_html=True)
+            st.image("wyspur.png", width=400)
+            st.title("Account Login")
+            st.markdown("</div>", unsafe_allow_html=True)
+            email = st.text_input("Email")
+            password = st.text_input("Password", type="password")
+        # If you also want the text inputs centered, just reuse a centered block
 
-        login_col, signup_col = st.columns(2)
-        with login_col:
-            login_button = st.button("Login", key="login_button_login_page") # Added key
-        with signup_col:
-            signup_button = st.button("Sign Up", key="signup_button_login_page") # Added key
 
+        # Now split the bottom portion into columns so that
+        # Login is on the left and Sign Up is on the right.
+        bottom_col1, _, bottom_col2 = st.columns([1,2,1])  # middle column is just spacer
+        with _:
+            login_button = st.button("Login", key="login_button_login_page")
+        #with bottom_col2:
+            #signup_button = st.button("Sign Up", key="signup_button_signup_page")
+
+        # Then handle authentication logic, etc.
         if login_button:
             user = authenticate_supabase(email, password)
             if user:
@@ -656,16 +714,62 @@ def login_signup_page():  # Make sure this function is defined
                 st.session_state.user = user
                 st.session_state.auth_failed = False
                 st.rerun()
-        elif signup_button:
-            response = signup_supabase(email, password)
-            if response:
-                st.success("Signup successful! Please check your email to verify your account.")
+
+        #elif signup_button:
+        #    response = signup_supabase(email, password)
+        #    if response:
+        #        st.success("Signup successful! Check your email to verify your account.")
 
         if st.session_state.get("auth_failed"):
             st.error("Invalid email or password")
+fake_display = st.empty
+
 
 
 def main():
+
+    st.markdown(
+        """
+        <style>
+         /* --- Login/Signup Button Styling - Kept from Iteration 4/5 (Pinker Colors & Size) --- */
+        div.stButton > button:first-child,
+        div.stButton > button:nth-of-type(2) {
+            background: linear-gradient(to right, #F770B7, #D546A2); /* Pinker Wyspur Gradient */
+            color: white;
+            border: none;
+            border-radius: 25px;
+            padding: 0.5em 1.2em;
+            font-weight: bold;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+            transition: background-color 0.3s ease;
+            display: inline-block;
+            width: auto;
+            min-width: 85px;
+            height: auto;
+            min-height: 36px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 0.9rem;
+        }
+
+        div.stButton > button:first-child:hover,
+        div.stButton > button:nth-of-type(2):hover {
+            background: linear-gradient(to right, #FF99CC, #F066B3); /* Lighter pink hover gradient */
+        }
+
+        /* Center almost everything inside a 'centered' container */
+        .centered {
+            display: flex;
+            flex-direction: column;
+            align-items: center;  /* horizontal centering */
+            justify-content: center;  /* vertical centering if needed */
+            text-align: center;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
         st.session_state.auth_failed = False
@@ -674,20 +778,32 @@ def main():
         login_signup_page()
     else:
 
-        
 
         # Initialize which page to show
         if "show_filter_tool" not in st.session_state:
             st.session_state.show_filter_tool = True
-       
+
+
+        # Inject CSS to center sidebar content
+        st.markdown(
+            """
+            <style>
+            [data-testid="stSidebar"] {
+                text-align: center;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
 
         with st.sidebar:
             st.image("wyspur.png", use_container_width=True)
-            st.title("Wyspur AI Tools")
+            st.title("AI Tools")
 
-            if st.button("AI Filter Tool", key="sidebar_filter_tool_button"): # Added key
+            if st.button("AI CSV FILTER ", key="sidebar_filter_tool_button"): # Added key
                 st.session_state.show_filter_tool = True
                 st.session_state.pop('filter_step', None) # Reset filter steps
+                st.session_state.step1_initialized = False # Reset step 1 initialization when going back to filter tool
 
 
             # Display user info and logout button (only when logged in)
@@ -702,15 +818,15 @@ def main():
                 st.rerun()
 
         tab_names = ["CSV Filter", "Saved Filters", "Filter History"]
-        tab1, tab2, tab3 = st.tabs(tab_names) 
+        tab1, tab2, tab3 = st.tabs(tab_names)
 
-        with tab1: 
+        with tab1:
             filter_tool()
         with tab2:
             saved_filters_tab_content()
-        with tab3: 
+        with tab3:
             filter_history_tab_content()
-       
+
 
 def filter_history_tab_content():
     """Content for the Filter History tab."""
@@ -756,7 +872,7 @@ def saved_filters_tab_content():
                         # Load filter_data['filter_parameters'] and populate UI
                         filter_params = json.loads(filter_data['filter_parameters'])
                         apply_saved_filter_to_ui(filter_params) # Function to apply to UI (see next step)
-                        
+
                 with col3:
                     if st.button("Delete", key=f"delete_filter_button_{filter_data['id']}"): # Added key - unique per filter
                         if delete_saved_filter_from_supabase(supabase, filter_data['id']):
@@ -780,7 +896,7 @@ def apply_saved_filter_to_ui(filter_params):
 
     # You might need to also set the text input values for keywords.
     # Since the UI is built step by step, setting session state should trigger UI updates on rerun.
-    st.session_state.show_filter_tool = True # Ensure filter tool is shown if not already   
+    st.session_state.show_filter_tool = True # Ensure filter tool is shown if not already
     st.info("Saved filter parameters applied! Go to the 'CSV Filter' tab to use them.") # ADD SUCCESS MESSAGE
 
 def reset_filter_parameters():
@@ -792,13 +908,14 @@ def reset_filter_parameters():
     st.session_state.filter_temperature = 0.0  # Reset to default value
     st.session_state.filter_selected_model = DEFAULT_MODEL  # Reset to default model
     st.session_state.filter_apply_fuzzy = False  # Reset to default value
+    st.session_state.step1_initialized = False # Reset step 1 initialization flag
     # Reset any other filter-related session state variables
 
     # If you're using the saved_filter_applied flag, reset it as well:
     st.session_state.saved_filter_applied = False
 
     st.info("Filter parameters reset!") # Confirmation message
-    
+
 
 
 if __name__ == "__main__":

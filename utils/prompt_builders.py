@@ -23,22 +23,18 @@ def build_user_instructions(column_keywords_dict: dict) -> str:
 
 def build_conceptual_text(slider_value: int) -> str:
     """
-    Return additional instructions for conceptual filtering based on a 1-5 scale:
-    
-        1 = Very strict
-        2 = Moderate (leaning strict)
-        3 = Moderate (balanced)
-        4 = Moderate (leaning broad)
-        5 = Very broad
+    Return instructions for conceptual filtering based on a 3-level scale:
 
-    The slider_value argument can be an integer between 1 and 5 inclusive.
-    This function lumps 2, 3, and 4 together into a single 'moderate' set of instructions by default,
-    but you can split them further if needed.
+        1 = Strict
+        2 = Moderate
+        3 = Broad
+
+    Now with rephrased numeric range instructions (Option 1) in Moderate and Broad levels.
     """
     if slider_value == 1:
-        # LEVEL 1: EXTREMELY STRICT EXCLUSIONS
+        # LEVEL 1: STRICT - CONCEPTUAL REASONING (3-LEVEL SLIDER)
         return """
-        LEVEL 1/5: EXTREMELY STRICT
+        LEVEL: STRICT - CONCEPTUAL FILTERING
 
         • Keep rows ONLY if they EXACTLY match the user’s keywords or a well-known,
           direct synonym.
@@ -54,26 +50,24 @@ def build_conceptual_text(slider_value: int) -> str:
           exclude the row (do NOT keep).
         """
 
-    elif slider_value == 5:
-        # LEVEL 5: VERY BROAD EXCLUSIONS
+    elif slider_value == 3:
+        # LEVEL 3: BROAD - CONCEPTUAL FILTERING (3-LEVEL SLIDER) - NUMERIC RANGE INSTRUCTIONS UPDATED (OPTION 1)
         return """
-        **Guidelines for Broad Reasoning (Level 5/5)**:
+        **LEVEL: BROAD - CONCEPTUAL FILTERING**
+
         • Use **synonyms, abbreviations**, or spelled-out forms:
         - E.g. "CEO" → "Chief Executive Officer," "CEOs," "C.E.O." "VP" → "Vice President," "Senior VP," "V.P."
         - If "VP of sales" is provided, Keep "SVP of Sales" or variations of that tile, but not a "VP of Product" as this title works in a different department.
         • If the column references **locations** (e.g., "USA"), consider any **cities** or **regions** in that country as relevant.
-        • For numeric **ranges** (e.g., "11 - 200 employees"), interpret partial or approximate references:
-        - "50-200" or "100-200" or "11-100" fit "11-200." and should be kept.
-        - If keyword is 50+, include all the ranges or numbers that are bigger than contain 50 or are bigger, example "1001-5000" would be kept.
+        • For numeric **employee count ranges** (e.g., "11 - 200 employees"):  **Keep rows if the listed employee count range *overlaps or falls within* the user-provided range.**
+            - Examples: If user provides "11 - 200", keep "50-200", "100-200", "11-100", "11-500", "150", but exclude "1-10", "300-500", "5".
         • For partial overlaps in text (e.g., "CEOs" vs. "oceans"), assume it’s relevant if the overlap is plausible; if ambiguous, **EXCLUDE**.
         • If you see *any* conceptual link—synonym, slight rewording,label it "KEEP."
         • If you are truly sure it doesn’t match any concept, "EXCLUDE."
         """
-    else:
-        # LEVELS 2, 3, AND 4: MODERATE EXCLUSIONS
+    else: # slider_value == 2: MODERATE - CONCEPTUAL REASONING (3-LEVEL SLIDER) - NUMERIC RANGE INSTRUCTIONS UPDATED (OPTION 1)
         return f"""
-        LEVEL {slider_value}/5: MODERATE APPROACH
-        (Note: Levels 2, 3, and 4 belong to this 'moderate' category.)
+        LEVEL: MODERATE - CONCEPTUAL FILTERING
 
         • Keep rows if they match or strongly relate to the user’s filter concepts.
         • Allow minor or faint references to remain; do NOT keep unless there is
@@ -93,10 +87,9 @@ def build_conceptual_text(slider_value: int) -> str:
               exclude the row.
         • In cases of doubt, lean towards excluding the row (i.e., do NOT keep
           unless it is fairly certain to be related).
-          • For numeric **ranges** (e.g., "11 - 200 employees"), interpret partial or approximate references:
-        - "50-200" or "100-200" or "11-100" fit "11-200." and should be kept.
+          • For numeric **employee count ranges** (e.g., "11 - 200 employees"):  **Keep rows if the listed employee count range *overlaps or falls within* the user-provided range.**
+            - Examples: If user provides "11 - 200", keep "50-200", "100-200", "11-100", "11-500", "150", but exclude "1-10", "300-500", "5".
         """
-
 
 
 def build_llm_prompt_single_col_json(
@@ -104,31 +97,51 @@ def build_llm_prompt_single_col_json(
     column_name: str,
     keywords: list,
     reasoning_text: str,
+    user_context: str = "" # <--- NEW: Added user_context parameter with default ""
 ) -> str:
     """
-    BUILD A JSON-BASED PROMPT FOR ONE COLUMN
+    BUILD A JSON-BASED PROMPT FOR ONE COLUMN (Column-Specific & with User Context)
 
     Instructs the LLM to analyze rows for a specific column and return JSON-based decisions:
       - "RowIndex": <integer>
       - "Decision": "KEEP" or "EXCLUDE"
+
+    Now with enhanced column-specific instructions and optional user context.
     """
     system_instructions = f"""
-    You are an advanced LLM conceptual reasoning filter, focusing on **one column**: "{column_name}".
-    Traditional filters cannot catch synonyms, slight variations, ranges, but you can!
+    You are a highly specialized AI filter, designed for **conceptual reasoning on spreadsheet data, one column at a time.**
+    You are now focusing EXCLUSIVELY on the **"{column_name}" column**. 
+    Your goal is to filter rows based on whether the **"{column_name}" values** conceptually relate to user-provided keywords.
 
-    **Context for This Column**:
-    - You are analyzing "{column_name}" entries in a spreadsheet. 
-    - Use your broader knowledge and reasoning about how data might be represented in this column to interpret potential synonyms, abbreviations, numeric ranges, or other variations.
+    **Detailed Context for "{column_name}" Column Analysis**:
+    - You are examining entries specifically within the **"{column_name}" column** of a spreadsheet.
+    - Understand that spreadsheet columns can contain various types of textual data.
+    - Apply broad, conceptual reasoning to identify matches, considering synonyms, related concepts, and variations typical for **textual data in spreadsheet columns.**
 
-    **Your Task**:
-    You will be given a series of row texts (one for each row). For each row:
-    1) Compare the text to the following filter concepts (broadly and creatively):  
+    **Filter Keywords for "{column_name}"**:
+    The user wants to filter (keep) rows that are conceptually related to these concepts:
     {', '.join(keywords)}
-    2) Decide whether this row matches within reason (i.e., is relevant to) **any** of these concepts. 
-    - If it matches (by synonyms/associated ideas), label this row "KEEP."
-    - Otherwise, label it "EXCLUDE."
+
+    **Your Task (Column-Specific Conceptual Filtering)**:
+    For each row, analyze the **"{column_name}" value** and decide:
+    1) Does it conceptually relate to *any* of the provided filter concepts for the **"{column_name}" column**?
+       * Consider the general context of textual data in spreadsheet columns.
+       * Use synonyms, abbreviations, and related terms.
+       * Apply the conceptual reasoning guidelines provided below (in 'Reasoning Text').
+    2) Based on your conceptual understanding, label each row as:
+       - "KEEP": If the **"{column_name}" value** is conceptually relevant to the keywords.
+       - "EXCLUDE": If the **"{column_name}" value** is NOT conceptually relevant.
+
+    Remember, you are filtering rows based on conceptual relevance to keywords **specifically within the "{column_name}" column.** 
     """
-    
+
+    if user_context: # <--- NEW: Include User Context in instructions if provided
+        system_instructions += f"""
+
+    **Additional User-Provided Context/Instructions for "{column_name}" Filtering:**
+    {user_context} 
+        """
+
     summaries_text = "\n".join(row_summaries)
 
     prompt = f"""
@@ -141,4 +154,3 @@ def build_llm_prompt_single_col_json(
     """
 
     return prompt.strip()
-

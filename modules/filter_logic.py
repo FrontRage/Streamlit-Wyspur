@@ -5,6 +5,7 @@ from io import StringIO
 import json
 import re
 from time import sleep
+from thefuzz import fuzz
 
 # We'll import from our utils modules:
 from utils.chunking import chunk_dataframe
@@ -121,7 +122,7 @@ def parse_llm_decisions_single_col_json(
 def filter_df_via_llm_per_column(
     df: pd.DataFrame,
     columns_to_check: list,
-    column_keywords: dict,
+    filter_column_config: dict,
     chunk_size: int,
     reasoning_text: str,
     model: str,
@@ -142,8 +143,8 @@ def filter_df_via_llm_per_column(
         The full DataFrame to filter.
     columns_to_check : list of str
         Column names the user wants to filter on.
-    column_keywords : dict
-        A dict mapping column_name -> list of keywords for that column.
+    filter_column_config : dict
+        A dict containing filter config for each column, including logic and keywords.
     chunk_size : int
         Number of rows per chunk to send in one prompt.
     reasoning_text : str
@@ -168,6 +169,7 @@ def filter_df_via_llm_per_column(
     - For row-level decisions, see aggregate_column_decisions() and filter_df_by_aggregated_decisions().
     """
     import logging
+    from thefuzz import fuzz # <---- IMPORT FUZZ HERE - IMPORTANT!
 
     logging.basicConfig(
         filename="llm_debug.log",
@@ -186,7 +188,7 @@ def filter_df_via_llm_per_column(
     chunks_done = 0
 
     # Optional debug container to avoid clutter
-    debug_container = st.container() if debug else None
+    debug_container = st.container() if debug else None # <----- Fixed typo: st.container.container() -> st.container()
 
     # We'll chunk the DataFrame
     for chunk_idx, chunk_df in enumerate(chunk_dataframe(df, chunk_size), start=1):
@@ -199,8 +201,66 @@ def filter_df_via_llm_per_column(
 
         # For each column the user wants to check
         for col in columns_to_check:
-            if col not in column_keywords:
+            # --- Get column-specific config from filter_column_config ---
+            col_config = filter_column_config.get(col, {}) # Get config for this column
+            keywords_str = col_config.get('keywords', "") # Get keywords as a STRING
+            logic = col_config.get('logic', "Conceptual Reasoning") # Get logic, default to Conceptual Reasoning
+            user_context = col_config.get('user_context', "") # Get user context (if any)
+
+            # --- SPLIT KEYWORD STRING INTO A LIST HERE ---
+            keywords_list = [kw.strip() for kw in keywords_str.split(',')] # Split by comma, strip whitespace
+            # Now 'keywords_list' is a list of strings (e.g., ['CEO', 'VP of Product', 'Director'])
+
+            st.write(f"--- Debug: Column: {col}, Logic: {logic}") # <--- DEBUG PRINT: LOGIC
+            st.write(f"--- Debug: Column: {col}, Keywords: {keywords_list}") # <--- DEBUG PRINT: KEYWORDS
+            st.write(f"--- Debug: Column: {col}, User Context: {user_context}") # <--- DEBUG PRINT: USER CONTEXT
+
+            if not keywords_list: # Use the LIST of keywords
                 continue  # No keywords => skip this column
+
+
+            # --- CONDITIONAL LOGIC BASED ON 'logic' SETTING ---
+            if logic == "Conceptual Reasoning":
+                st.write(f"--- Debug: Column: {col}, Applying Conceptual Reasoning Logic (LLM will be called)") # <--- Placeholder message
+                # ... (Conceptual Reasoning logic will go here in future steps) ...
+                # For now, just proceed with the existing prompt building and LLM call (for Conceptual Reasoning)
+
+            elif logic == "Exact Match":
+                st.write(f"--- Debug: Column: {col}, Applying Exact Match Logic") # Debug message
+                col_decisions = {} # Initialize decisions for this column
+
+                for row_idx, row_data in chunk_df.iterrows():
+                    cell_value = str(row_data[col]).lower()
+                    is_match = False # Assume no match initially
+
+                    for keyword in keywords_list:
+                        if cell_value == keyword.lower().strip(): # Exact match (case-insensitive, whitespace stripped)
+                            is_match = True
+                            break # Exit keyword loop if exact match found
+                        elif fuzz.ratio(cell_value, keyword.lower().strip()) >= 85: # Fuzzy match (threshold 85)
+                            is_match = True
+                            break # Exit keyword loop if fuzzy match found
+
+                    # --- REVERSED KEEP/EXCLUDE LOGIC HERE ---
+                    if is_match:
+                        col_decisions[row_idx] = "KEEP" # <--- CORRECTED: KEEP if exact or fuzzy match
+                    else:
+                        col_decisions[row_idx] = "EXCLUDE" # <--- CORRECTED: EXCLUDE if NOT exact or fuzzy match
+
+                decisions_per_column[col] = col_decisions # Store decisions for this column
+                continue # <--- IMPORTANT: Skip LLM call for "Exact Match" - CONTINUE TO NEXT COLUMN
+
+            elif logic == "User Context":
+                st.write(f"--- Debug: Column: {col}, Applying User Context Logic (Placeholder - LLM will be called)") # Debug message
+                # ... (User Context logic will go here in Phase 4.4) ...
+                # For now, fall through to Conceptual Reasoning (LLM call below)
+
+            else: # Conceptual Reasoning (and default case)
+                st.warning(f"Unknown logic type '{logic}' for column '{col}'. Defaulting to Conceptual Reasoning.")
+                st.write(f"--- Debug: Column: {col}, Applying Conceptual Reasoning Logic (Default - LLM will be called)") # <--- Placeholder message
+                # ... (Conceptual Reasoning logic will go here in future steps) ...
+                # Fall through to prompt building and LLM call below
+
 
             # 1) Build row summaries for JUST this column
             row_summaries = []
@@ -213,8 +273,9 @@ def filter_df_via_llm_per_column(
             prompt = build_llm_prompt_single_col_json(
                 row_summaries=row_summaries,
                 column_name=col,
-                keywords=column_keywords[col],
-                reasoning_text=reasoning_text
+                keywords=keywords_list, # <--- Pass the LIST of keywords here
+                reasoning_text=reasoning_text,
+                user_context=user_context # <--- NEW: Pass user_context here!
             )
 
             # Debug: Show the prompt
@@ -348,8 +409,8 @@ def filter_df_by_aggregated_decisions(
 def filter_df_master(
     df: pd.DataFrame,
     columns_to_check: list,
-    column_keywords: dict,
-    chunk_size: int,
+    filter_column_config: dict,  # <--- CORRECT: 'filter_column_config' in THIRD position
+    chunk_size: int,          # <--- CORRECT: 'chunk_size' ADDED, in FOURTH position
     model: str,
     temperature: float,
     reasoning_text: str,
@@ -366,8 +427,8 @@ def filter_df_master(
     decisions_per_col = filter_df_via_llm_per_column(
         df=df,
         columns_to_check=columns_to_check,
-        column_keywords=column_keywords,
-        chunk_size=chunk_size,
+        filter_column_config=filter_column_config, # <--- Correctly passing 'filter_column_config' NOW
+        chunk_size=chunk_size,         # <--- Correctly passing 'chunk_size'
         model=model,
         temperature=temperature,
         reasoning_text=reasoning_text,
