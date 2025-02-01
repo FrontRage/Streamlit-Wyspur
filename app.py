@@ -481,7 +481,7 @@ def filter_tool():
         st.session_state.filter_conceptual_slider_label = st.select_slider( # Changed to select_slider for labels
             "Choose Reasoning Strictness Level:", # Changed slider label
             options=level_options,
-            value="Moderate", # Default to "Moderate"
+            value="Broad", # Default to "Broad"
             key="conceptual_strictness_slider",
             help="""
             • Strict: Very precise, keep only highly relevant matches.
