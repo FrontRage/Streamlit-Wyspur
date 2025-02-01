@@ -1,6 +1,7 @@
 import streamlit as st
 from streamlit_lottie import st_lottie
 # Set page config for wider layout and custom font (optional)
+import streamlit.components.v1 as components
 st.set_page_config(layout="centered", page_title="wysper Ai")
 
 import pandas as pd
@@ -11,7 +12,6 @@ import io
 import time
 
 # Import modules for tools
-from modules.fuzzy_logic import python_pre_filter_fuzzy
 from utils.prompt_builders import build_user_instructions, build_conceptual_text
 from config import MODEL_OPTIONS, DEFAULT_MODEL
 
@@ -63,16 +63,28 @@ def signup_supabase(email, password):
 def save_filter_to_supabase(supabase_client, user_id, filter_name, filter_params_dict):
     """Saves filter parameters to Supabase."""
     try:
+        # --- Construct filter_params dictionary HERE ---
+        filter_params = { # Capture current filter parameters
+            "selected_columns": st.session_state.filter_selected_columns,
+            "column_config": st.session_state.filter_column_config, # <--- NEW STRUCTURE - SAVE COLUMN CONFIG
+            "conceptual_slider": st.session_state.filter_conceptual_slider,
+            "chunk_size": st.session_state.filter_chunk_size,
+            "temperature": st.session_state.filter_temperature,
+            "selected_model": st.session_state.filter_selected_model,
+            # "apply_fuzzy": st.session_state.filter_apply_fuzzy,
+            # Add any other relevant filter parameters you want to save
+        }
+        # --- NOW save filter_params to Supabase ---
         response = supabase_client.table("saved_filters").insert({
             "user_id": user_id,
             "filter_name": filter_name,
-            "filter_parameters": json.dumps(filter_params_dict) # Serialize to JSON
+            "filter_parameters": json.dumps(filter_params) # Serialize to JSON
         }).execute()
         st.write("Response object from Supabase (Save Filter):") # Keep for debugging
         st.write(response) # Keep for debugging
 
-        st.success(f"Filter '{filter_name}' saved successfully!") # <--- CORRECT INDENTATION
-        return True # <--- CORRECT INDENTATION
+        st.success(f"Filter '{filter_name}' saved successfully!")
+        return True
 
     except Exception as e:
         st.error(f"An unexpected error occurred while saving filter: {e}")
@@ -160,14 +172,15 @@ def load_filter_history_from_supabase(supabase_client, user_id):
 # HELPER FUNCTIONS FOR Lottie Animation
 # ------------------------------
 
-def stream_greeting_message(username): # Function to stream greeting text
-    greeting = f"""Hello, {username}!  Ready to unleash the power of AI to filter your CSV data?
-     Let's get started!🚀 
-     Step1. Upload your CSV file below.
-     """ # Personalized greeting
+def stream_greeting_message(username): # Function to stream greeting text WITH <br> for line breaks
+    greeting = f"""Hello, {username}!<br>"""  # Use <br> for line break after "Hello, username!"
+    greeting += """Ready to unleash the power of AI to filter your CSV data?<br>""" # <br> after the question
+    greeting += """Let's get started!🚀<br>""" # <br> after "Let's get started!"
+    greeting += """Step 1. Upload your CSV file below.""" # No <br> at the very end if you don't want extra space
+
     for word in greeting.split(" "):
         yield word + " "
-        time.sleep(0.07) # Adjust speed as needed (0.05 is a bit slower than 0.02)
+        time.sleep(0.07) # Adjust speed as needed
 
 # ------------------------------
 # HELPER FUNCTIONS FOR COMPARISON
@@ -198,146 +211,46 @@ def load_lottiefile(filepath: str):
 # MAIN TOOLS
 # ------------------------------
 
-def compare_tool():
-    """Compare Files Tool UI logic with step-by-step approach."""
-    st.title("Compare Two Files by ProfileId")
-
-    if "compare_step" not in st.session_state:
-        st.session_state.compare_step = 1
-
-    if st.session_state.compare_step == 1:
-        st.session_state.compare_col_name = st.text_input("Enter the column name to match on", "ProfileId")
-        st.session_state.compare_file1 = st.file_uploader("Upload first file", type=["csv", "xlsx", "xls"])
-        if st.session_state.compare_file1:
-            st.session_state.compare_step = 2
-            st.rerun()
-
-    elif st.session_state.compare_step == 2:
-        st.session_state.compare_file2 = st.file_uploader("Upload second file", type=["csv", "xlsx", "xls"])
-        if st.session_state.compare_file2:
-            try:
-                df1 = read_file(st.session_state.compare_file1)
-                df2 = read_file(st.session_state.compare_file2)
-
-                col_name = st.session_state.compare_col_name
-                if col_name not in df1.columns or col_name not in df2.columns:
-                    st.error(f"Column '{col_name}' not found in one or both files.")
-                    st.session_state.compare_step = 1
-                    st.rerun()
-                    return
-
-                df1[col_name] = df1[col_name].astype(str)
-                df2[col_name] = df2[col_name].astype(str)
-
-                matching_ids = set(df1[col_name]) & set(df2[col_name])
-
-                st.session_state.compare_df_matches = df1[df1[col_name].isin(matching_ids)].copy()
-                st.session_state.compare_df_non_matches_file1 = df1[~df1[col_name].isin(matching_ids)].copy()
-                st.session_state.compare_df_non_matches_file2 = df2[~df2[col_name].isin(matching_ids)].copy()
-
-                st.session_state.compare_step = 3
-                st.rerun()
-
-            except Exception as e:
-                st.error(f"An error occurred: {e}")
-                st.session_state.compare_step = 1
-                st.rerun()
-
-    elif st.session_state.compare_step == 3:
-        if 'compare_df_matches' in st.session_state:
-            st.subheader("Preview: Matches (from first file)")
-            st.write(st.session_state.compare_df_matches.head())
-
-            st.subheader(f"Preview: Non Matches in {st.session_state.compare_file1.name}")
-            st.write(st.session_state.compare_df_non_matches_file1.head())
-
-            st.subheader(f"Preview: Non Matches in {st.session_state.compare_file2.name}")
-            st.write(st.session_state.compare_df_non_matches_file2.head())
-
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                st.session_state.compare_df_matches.to_excel(writer, index=False, sheet_name='Matches')
-
-                file1_sheet_name = shorten_sheet_name(st.session_state.compare_file1.name)
-                st.session_state.compare_df_non_matches_file1.to_excel(writer, index=False, sheet_name=file1_sheet_name)
-
-                file2_sheet_name = shorten_sheet_name(st.session_state.compare_file2.name)
-                st.session_state.compare_df_non_matches_file2.to_excel(writer, index=False, sheet_name=file2_sheet_name)
-
-            st.download_button(
-                label="Download Comparison Results",
-                data=output.getvalue(),
-                file_name="comparison_result.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="compare_download_button" # Added key
-            )
-
-        if st.button("Back to Upload Files", key="compare_back_to_upload_button"): # Added key
-            st.session_state.compare_step = 1
-            st.rerun()
-
-
-def calculator_tool():
-    """Calculator tool UI logic with step-by-step approach."""
-    st.header("Calculator")
-
-    if "calc_step" not in st.session_state:
-        st.session_state.calc_step = 1
-
-    if st.session_state.calc_step == 1:
-        st.session_state.calc_num1 = st.number_input("Enter first number", value=0.0, format="%.2f")
-        if st.button("Next", key="calc_next_button_step1"): # Added key
-            st.session_state.calc_step = 2
-            st.rerun()
-
-    elif st.session_state.calc_step == 2:
-        st.session_state.calc_num2 = st.number_input("Enter second number", value=0.0, format="%.2f")
-        st.session_state.calc_operation = st.selectbox("Select operation", ["Add", "Subtract", "Multiply", "Divide"])
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Back", key="calc_back_button_step2"): # Added key
-                st.session_state.calc_step = 1
-                st.rerun()
-        with col2:
-            if st.button("Calculate", key="calc_calculate_button_step2"): # Added key
-                st.session_state.calc_step = 3
-                st.rerun()
-
-    elif st.session_state.calc_step == 3:
-        num1 = st.session_state.calc_num1
-        num2 = st.session_state.calc_num2
-        operation = st.session_state.calc_operation
-
-        if operation == "Add":
-            result = num1 + num2
-        elif operation == "Subtract":
-            result = num1 - num2
-        elif operation == "Multiply":
-            result = num1 * num2
-        elif operation == "Divide":
-            result = num1 / num2 if num2 != 0 else "Error: Division by zero"
-
-        st.write(f"Result: {result}")
-        if st.button("Start Over", key="calc_start_over_button_step3"): # Added key
-            st.session_state.calc_step = 1
-            st.rerun()
 
 
 def filter_tool():
-    
+
     """Filter tool UI logic with step-by-step approach."""
-    
+
 
     if "filter_step" not in st.session_state:
         st.session_state.filter_step = 1
+    if "step1_initialized" not in st.session_state: # Initialize session state for step 1 load tracking
+        st.session_state.step1_initialized = False
 
     if st.session_state.filter_step == 1:
-        
-        
-        
-        step1_col1, step1_col2 = st.columns([1,1])
+
+        step1_col1, step1_col2, step1_col3 = st.columns([1, 3, 1]) # Create 3 columns
+
         with step1_col1:
-        
+            # Inject CSS to left content in the left column (for animation)
+            st.markdown(
+                    """
+                    <style>
+                        .stColumn:nth-child(2) { /* Target the second stColumn within stHorizontalBlock (adjust index if needed) */
+                            background-color: #e6f7ff; /* Light blue bubble background */
+                            border: 2px solid #91bfdb; /* Blue border */
+                            border-radius: 15px;
+                            padding: 15px;
+                            margin-bottom: 10px;
+                            text-align: left; /* Keep text alignment left within the bubble */
+                            display: inline-block; /* To make bubble wrap content */
+                            vertical-align: top; /* Align bubble to the top of the column */
+                        }
+                        .stColumn:nth-child(3) p { /* Style paragraph text INSIDE the bubble */
+                            margin: 0;
+                            word-wrap: break-word;
+                        }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            # Middle column - Lottie Animation
             lottie_filepath = "lottie/wyspur_lottie.json" # Replace with your file path
             lottie_json = load_lottiefile(lottie_filepath)
 
@@ -348,18 +261,85 @@ def filter_tool():
                     reverse=False,
                     loop=True,
                     quality="high",
-                    height=300,
-                    width=300,
+                    height=300 / 2,
+                    width=300 / 2,
                     key=None,
                 )
             else:
                 st.error(f"Failed to load Lottie animation from file: {lottie_filepath}")
-        with step1_col2:    
+        
+
+        with step1_col2:
+            # Middle column - Greeting Text (Chat Bubble Style - Font Change AND Error Fix - CORRECTED)
             user = st.session_state.user
-            main_content_placeholder = st.empty()
-            with main_content_placeholder.container():
-                time.sleep(0.0)  # Add a small delay for better UX
-                st.write_stream(stream_greeting_message(user.email.split('@')[0]))
+
+            if not st.session_state.step1_initialized:
+                time.sleep(0.0)
+
+                # Inject CSS for chat bubble using st.markdown (targeting column 2 now) - FONT CHANGE and other styles
+                st.markdown(
+                    """
+                    <style>
+                        .stColumn:nth-child(2) { /* Target the SECOND stColumn within stHorizontalBlock */
+                            background-color: #e6f7ff;
+                            border: 2px solid #91bfdb;
+                            border-radius: 15px;
+                            padding: 8px; /* Reduced padding */
+                            margin-bottom: 10px;
+                            text-align: left;
+                            display: inline-block;
+                            vertical-align: top;
+                        }
+                        .chat-bubble-text-js { /* Class for text INSIDE the bubble - FONT CHANGED */
+                            margin: 0;
+                            word-wrap: break-word;
+                            white-space: pre-line;
+                            font-family: 'Courier New', monospace; /* Font changed to Courier New, monospace */
+                        }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                greeting_text_full = stream_greeting_message(user.email.split('@')[0]) # Get greeting text from Python function
+
+                # Use st.components.v1.html to inject chat bubble and JavaScript streaming (in column 2)
+                components.html(
+                    f"""
+                    <div class="chat-bubble">
+                        <p class="chat-bubble-text-js" id="chat-bubble-text-area"></p>  <!-- Target for JS streaming -->
+                    </div>
+
+                    <script>
+                        function streamText(text, elementId) {{
+                            let words = text.split(' ');
+                            let index = 0;
+                            let intervalId = setInterval(() => {{
+                                if (index < words.length) {{
+                                    document.getElementById(elementId).innerHTML += words[index] + ' ';
+                                    index++;
+                                }} else {{
+                                    clearInterval(intervalId);
+                                }}
+                            }}, 70); // Adjust speed as needed
+                        }}
+
+                        let greeting = `{ "".join(stream_greeting_message(user.email.split('@')[0])) }`; // <-----  CRITICAL LINE: Pass the FUNCTION'S OUTPUT as a STRING
+                        streamText(greeting, 'chat-bubble-text-area'); // Call JS streaming function
+                    </script>
+                    """,
+                    height=100, # Adjust height as needed
+                    scrolling=False,
+                )
+
+
+                st.session_state.step1_initialized = True # Mark step 1 as initialized
+            
+      
+
+        with step1_col3:
+            # Right most column - Spacer (can be empty or minimal content)
+            pass  
 
         st.session_state.filter_uploaded_file = st.file_uploader("Upload a CSV file to filter", type=["csv"])
         if st.session_state.filter_uploaded_file:
@@ -374,20 +354,25 @@ def filter_tool():
 
     elif st.session_state.filter_step == 2:
         st.subheader("Column Selection")
-        if 'filter_df' in st.session_state:  # Check if filter_df exists in session state
+        if 'filter_df' in st.session_state:
             all_columns = st.session_state.filter_df.columns.tolist()
 
-            # --- THE FIX IS HERE ---
             default_columns = st.session_state.get("filter_selected_columns", [])
-            selected_columns = st.multiselect(
+
+            # --- CORRECTED CALLBACK FUNCTION ---
+            def update_selected_columns():
+                st.session_state.filter_selected_columns = st.session_state.filter_multiselect_step2
+
+            # --- MULTISELECT WITH on_change (Corrected - no temp variable needed) ---
+            st.multiselect(
                 "Pick one or more columns to filter on:",
                 all_columns,
-                default=default_columns,  # Use 'default' to pre-select
-                key="filter_multiselect_step2"  # Important: Add a key here!
+                default=default_columns,
+                key="filter_multiselect_step2", # Key is important for callback to work correctly
+                on_change=update_selected_columns # Call the callback function on change
             )
-            st.session_state.filter_selected_columns = selected_columns # Update the session state
+            # --- END MULTISELECT ---
 
-            # --- ---------------- ---
 
             col1, col2, col3 = st.columns([1,1,1])
             with col1:
@@ -407,20 +392,61 @@ def filter_tool():
                     else:
                         st.warning("Please select at least one column.")
 
+            # st.write("--- Relevant Session State (Step 2) ---") # Keep for debugging
+            # st.write("filter_selected_columns:", st.session_state.get("filter_selected_columns"))
+            # st.write("filter_multiselect_step2:", st.session_state.get("filter_multiselect_step2"))
+
         else:
-            st.warning("Please upload a CSV file first.") # Handle case where no file is uploaded yetlect at least one column.")
+            st.warning("Please upload a CSV file first.")
 
 
     elif st.session_state.filter_step == 3:
-        st.subheader("Enter Filter Keywords")
-        if "filter_column_keywords" not in st.session_state:
-            st.session_state.filter_column_keywords = {}
+        st.subheader("Enter Filter Keywords and Logic")
+        if "filter_column_config" not in st.session_state:
+            st.session_state.filter_column_config = {}
 
         for col in st.session_state.filter_selected_columns:
-            st.session_state.filter_column_keywords[col] = st.text_input(
+            col_config = st.session_state.filter_column_config.get(col, {})
+
+            if col not in st.session_state.filter_column_config: # Initialize if not already present
+                st.session_state.filter_column_config[col] = {}
+
+            # --- ENSURE DEFAULT LOGIC IS SET IN SESSION STATE ---
+            if 'logic' not in st.session_state.filter_column_config[col]:
+                st.session_state.filter_column_config[col]['logic'] = "Conceptual Reasoning" # Set default logic
+
+            st.session_state.filter_column_config[col]['keywords'] = st.text_input(
                 f"Enter filter keywords for '{col}' (comma-separated)",
-                value=st.session_state.filter_column_keywords.get(col, "")
+                value=col_config.get('keywords', ""),
+                key=f"keywords_input_{col}" # Unique key for text_input as well
             )
+
+            logic_options = ["Conceptual Reasoning", "Exact Match", "User Context"]
+
+            # --- CALLBACK FUNCTION FOR LOGIC SELECTBOX ---
+            def update_column_logic(col_name=col): # Pass column name using default argument
+                st.session_state.filter_column_config[col_name]['logic'] = st.session_state[f"logic_selectbox_{col_name}"]
+
+            # --- SELECTBOX WITH on_change ---
+            st.selectbox(
+                f"Select logic for '{col}'",
+                options=logic_options,
+                index=logic_options.index(st.session_state.filter_column_config[col]['logic']), # Use session state default for index
+                key=f"logic_selectbox_{col}", # Key is important for callback
+                on_change=update_column_logic # Call the callback function
+            )
+            # --- END SELECTBOX ---
+
+
+            if st.session_state.filter_column_config[col].get('logic') == "User Context": # Use .get() for safety
+                st.session_state.filter_column_config[col]['user_context'] = st.text_area(
+                    f"Enter user context for '{col}' (optional)",
+                    value=col_config.get('user_context', ""),
+                    height=75,
+                    key=f"context_textarea_{col}"
+                )
+            else:
+                st.session_state.filter_column_config[col].pop('user_context', None)
 
 
         col1, col2, col3 = st.columns([1,1,1])
@@ -435,22 +461,43 @@ def filter_tool():
                 st.rerun()
         with col3:
             if st.button("Next", key="filter_next_button_step3"): # Added key
-                if all(st.session_state.filter_column_keywords.get(col) is not None for col in st.session_state.filter_selected_columns):
+                if all(st.session_state.filter_column_config.get(col, {}).get('keywords') is not None for col in st.session_state.filter_selected_columns):
                     st.session_state.filter_step = 4
                     st.rerun()
                 else:
                     st.warning("Please enter keywords for all selected columns.")
 
+        # st.write("--- Session State (Step 3) ---") # Add this line
+        # st.write("filter_column_config:", st.session_state.get("filter_column_config")) # Print only relevant part
+
 
 
 
     elif st.session_state.filter_step == 4:
-        st.subheader("Conceptual Reasoning & Chunk Size")
-        st.session_state.filter_conceptual_slider = st.slider(
-            "Conceptual Reasoning Strictness (1=Very Strict, 5=Very Broad)", 1, 5, 5
-        )
-        st.write("---")
+        st.subheader("Conceptual Reasoning & Chunk Size") # Changed subheader text
 
+        # --- MODIFIED SLIDER FOR 3 LEVELS ---
+        level_options = ["Strict", "Moderate", "Broad"] # Define slider labels
+        st.session_state.filter_conceptual_slider_label = st.select_slider( # Changed to select_slider for labels
+            "Choose Reasoning Strictness Level:", # Changed slider label
+            options=level_options,
+            value="Moderate", # Default to "Moderate"
+            key="conceptual_strictness_slider",
+            help="""
+            • Strict: Very precise, keep only highly relevant matches.
+            • Moderate: Balanced approach, keep reasonably relevant matches (recommended default).
+            • Broad: Very inclusive, keep even loosely related matches.
+            """, # Updated help text for 3 levels
+        )
+        # --- Map labels back to numeric values for build_conceptual_text ---
+        label_to_value_map = {"Strict": 1, "Moderate": 2, "Broad": 3} # Define mapping
+        st.session_state.filter_conceptual_slider = label_to_value_map[st.session_state.filter_conceptual_slider_label] # Map label to value
+        # --- END MODIFIED SLIDER ---
+
+
+        st.write("---") # Keep separator
+
+        # --- CHUNK SIZE INPUT - KEPT AS IS ---
         st.session_state.filter_chunk_size = st.number_input(
             "Chunk Size for LLM Processing",
             value=400,
@@ -458,21 +505,21 @@ def filter_tool():
             step=1,
             help="Fewer rows per chunk reduces prompt size, but increases the number of LLM calls."
         )
+        # --- END CHUNK SIZE INPUT ---
 
 
-        col1, col2, col3 = st.columns([1,1,1])
+        col1, col2, col3 = st.columns([1,1,1]) # Keep columns for buttons
         with col1:
-            if st.button("Back", key="filter_back_button_step4"): # Added key
+            if st.button("Back", key="filter_back_button_step4"):
                 st.session_state.filter_step = 3
                 st.rerun()
         with col2:
-            if st.button("Reset Filter", key="filter_reset_button_step4"): # Reset button
+            if st.button("Reset Filter", key="filter_reset_button_step4"):
                 reset_filter_parameters()
-                st.session_state.filter_step = 1  # Go back to step 1 after reset. Change if different reset behaviour is needed
+                st.session_state.filter_step = 1
                 st.rerun()
         with col3:
-
-            if st.button("Next", key="filter_next_button_step4"): # Added key
+            if st.button("Next", key="filter_next_button_step4"):
                 st.session_state.filter_step = 5
                 st.rerun()
 
@@ -487,9 +534,6 @@ def filter_tool():
             step=0.1
         )
 
-        st.session_state.filter_conceptual_slider = st.slider(
-            "Conceptual Reasoning Strictness (1=Very Strict, 5=Very Broad)", 1, 5, 5
-        )
 
         col1, col2, col3 = st.columns([1,1,1])
         with col1:
@@ -508,7 +552,7 @@ def filter_tool():
 
 
     elif st.session_state.filter_step == 6:
-        st.subheader("Model & Fuzzy Filtering")
+        st.subheader("Model Selection")
 
         st.session_state.filter_selected_model = st.selectbox(
             "Select the LLM Model:",
@@ -521,9 +565,9 @@ def filter_tool():
                 "\u26A0\uFE0F You've selected an expensive model! Consider using 'GPT-4o-mini' for affordability."
             )
 
-        st.session_state.filter_apply_fuzzy = st.checkbox("Apply Python-based Fuzzy Pre-Filter?", value=False)
-        if st.session_state.filter_apply_fuzzy and st.session_state.filter_column_keywords:
-            st.info("Using fuzzy pre-filter with threshold=85 to remove obvious matches before LLM filtering.")
+        # st.session_state.filter_apply_fuzzy = st.checkbox("Apply Python-based Fuzzy Pre-Filter?", value=False)
+        # if st.session_state.filter_apply_fuzzy and st.session_state.filter_column_config:
+        #     st.info("Using fuzzy pre-filter with threshold=85 to remove obvious matches before LLM filtering.")
 
 
         col1, col2, col3 = st.columns([1,1,1])
@@ -547,115 +591,137 @@ def filter_tool():
         st.write("Review your settings and click 'Start Filtering' to proceed.")
         st.session_state.filter_debug_mode = st.checkbox("Show LLM debugging info?", value=False)
 
-        with st.expander("Save Filter (Optional)"): # Add expander for saving filters
-                save_filter_name = st.text_input("Save filter as:", key="save_filter_name_input")
-                if st.button("Save Filter", key="save_filter_button_step7"): # Added key
-                    if save_filter_name:
-                        current_user = st.session_state.user # User is already in session state
-                        if current_user:
-                            filter_params = { # Capture current filter parameters
-                                "selected_columns": st.session_state.filter_selected_columns,
-                                "column_keywords": st.session_state.filter_column_keywords,
-                                "conceptual_slider": st.session_state.filter_conceptual_slider,
-                                "chunk_size": st.session_state.filter_chunk_size,
-                                "temperature": st.session_state.filter_temperature,
-                                "selected_model": st.session_state.filter_selected_model,
-                                "apply_fuzzy": st.session_state.filter_apply_fuzzy,
-                                # Add any other relevant filter parameters you want to save
-                            }
-                            save_filter_to_supabase(supabase, current_user.id, save_filter_name, filter_params)
-                        else:
-                            st.warning("You must be logged in to save filters.")
+        with st.expander("Save Filter (Optional)"):  # Add expander for saving filters
+            save_filter_name = st.text_input("Save filter as:", key="save_filter_name_input")
+            if st.button("Save Filter", key="save_filter_button_step7"):  # Added key
+                if save_filter_name:
+                    current_user = st.session_state.user  # User is already in session state
+                    if current_user:
+                        filter_params = {  # Capture current filter parameters
+                            "selected_columns": st.session_state.filter_selected_columns,
+                            "column_keywords": st.session_state.filter_column_config,
+                            "conceptual_slider": st.session_state.filter_conceptual_slider,
+                            "chunk_size": st.session_state.filter_chunk_size,
+                            "temperature": st.session_state.filter_temperature,
+                            "selected_model": st.session_state.filter_selected_model,
+                            # "apply_fuzzy": st.session_state.filter_apply_fuzzy,
+                            # Add any other relevant filter parameters you want to save
+                        }
+                        save_filter_to_supabase(
+                            supabase, current_user.id, save_filter_name, filter_params
+                        )
                     else:
-                        st.warning("Please enter a name for your filter to save.")
+                        st.warning("You must be logged in to save filters.")
+                else:
+                    st.warning("Please enter a name for your filter to save.")
 
-        if st.button("Start Filtering", key="filter_start_filtering_button_step7"): # Added key
+        if st.button("Start Filtering", key="filter_start_filtering_button_step7"):
             st.write("Filtering in progress...")
-            conceptual_instructions = build_conceptual_text(st.session_state.filter_conceptual_slider)
+            conceptual_instructions = build_conceptual_text(
+                st.session_state.filter_conceptual_slider
+            )
 
             df_for_filtering = st.session_state.filter_df.copy()
-            if st.session_state.filter_apply_fuzzy and st.session_state.filter_column_keywords:
-                df_pre_filtered, excluded_rows = python_pre_filter_fuzzy(df_for_filtering, st.session_state.filter_column_keywords, threshold=85)
-                st.write(f"Rows remaining after fuzzy filter: {len(df_pre_filtered)} / {len(df_for_filtering)}")
-                df_for_filtering = df_pre_filtered
 
+            # if st.session_state.filter_apply_fuzzy and st.session_state.filter_column_config:
+            #     df_pre_filtered, excluded_rows = python_pre_filter_fuzzy(
+            #         df_for_filtering,
+            #         st.session_state.filter_column_config,
+            #         threshold=85
+            #     )
+            #     st.write(
+            #         f"Rows remaining after fuzzy filter: {len(df_pre_filtered)} / {len(df_for_filtering)}"
+            #     )
+            #     df_for_filtering = df_pre_filtered
 
-            filtered_df_col = filter_df_master(
+            # NEW: filter_df_master returns TWO DataFrames: (kept, excluded)
+            filtered_df_col, excluded_df_col = filter_df_master(
                 df=df_for_filtering,
                 columns_to_check=st.session_state.filter_selected_columns,
-                column_keywords={k: [v] if isinstance(v, str) else v.split(',') for k, v in st.session_state.filter_column_keywords.items()},
+                filter_column_config=st.session_state.filter_column_config,
                 chunk_size=st.session_state.filter_chunk_size,
                 reasoning_text=conceptual_instructions,
                 model=st.session_state.filter_selected_model,
                 temperature=st.session_state.filter_temperature,
-                debug=st.session_state.filter_debug_mode
+                debug=st.session_state.filter_debug_mode,
             )
 
+            # Store both in session state
             st.session_state.filter_filtered_df_col = filtered_df_col
-            st.session_state.filter_excluded_df_col = df_for_filtering[~df_for_filtering.index.isin(filtered_df_col.index)]
+            st.session_state.filter_excluded_df_col = excluded_df_col
 
-            # --- RECORD FILTER HISTORY ---
-            current_user = st.session_state.user
-            if current_user:
-                filter_params_history = { # Capture filter parameters for history
-                    "selected_columns": st.session_state.filter_selected_columns,
-                    "column_keywords": st.session_state.filter_column_keywords,
-                    "conceptual_slider": st.session_state.filter_conceptual_slider,
-                    "chunk_size": st.session_state.filter_chunk_size,
-                    "temperature": st.session_state.filter_temperature,
-                    "selected_model": st.session_state.filter_selected_model,
-                    "apply_fuzzy": st.session_state.filter_apply_fuzzy,
-                }
-                original_filename = st.session_state.filter_uploaded_file.name # Get original filename
-                record_filter_history_to_supabase(supabase, current_user.id, filter_params_history, original_filename, st.session_state.filter_filtered_df_col)
-
-                st.session_state.filter_step = 8
-                st.rerun()
-
-        col1, col2= st.columns(2)
-        with col1:
-
-            if st.button("Back", key="filter_back_button_step7"): # Added key
-                st.session_state.filter_step = 6
-                st.rerun()
-        with col2:
-            if st.button("Reset Filter", key="filter_reset_button_step7"): # Reset button
-                reset_filter_parameters()
-                st.session_state.filter_step = 1  # Go back to step 1 after reset. Change if different reset behaviour is needed
-                st.rerun()
+            # # --- RECORD FILTER HISTORY ---
+            # current_user = st.session_state.user
+            # if current_user:
+            #     filter_params_history = {
+            #         "selected_columns": st.session_state.filter_selected_columns,
+            #         "column_keywords": st.session_state.filter_column_config,
+            #         "conceptual_slider": st.session_state.filter_conceptual_slider,
+            #         "chunk_size": st.session_state.filter_chunk_size,
+            #         "temperature": st.session_state.filter_temperature,
+            #         "selected_model": st.session_state.filter_selected_model,
+            #         # "apply_fuzzy": st.session_state.filter_apply_fuzzy,
+            #     }
+            #     original_filename = st.session_state.filter_uploaded_file.name
+            #     record_filter_history_to_supabase(
+            #         supabase,
+            #         current_user.id,
+            #         filter_params_history,
+            #         original_filename,
+            #         st.session_state.filter_filtered_df_col,
+            #     )
 
 
-    elif st.session_state.filter_step == 8:
-        st.subheader("Filtering Results")
+
+        # Display filtering results only if a filter has been run
         if 'filter_filtered_df_col' in st.session_state:
-            st.write("Preview of filtered data (Per-Column approach):")
-            st.dataframe(st.session_state.filter_filtered_df_col.head(50))
+            st.subheader("Filtering Results")
+            st.write("Preview of filtered data:")
+            st.write(f"Number of kept rows: {len(st.session_state.filter_filtered_df_col)}")
+            st.dataframe(st.session_state.filter_filtered_df_col.head(10))
 
             st.write("---")
             st.write(f"Number of excluded rows: {len(st.session_state.filter_excluded_df_col)}")
-            st.dataframe(st.session_state.filter_excluded_df_col.head(50))
+            st.dataframe(st.session_state.filter_excluded_df_col.head(10))
 
             # Download KEPT rows
-            csv_data_filtered = st.session_state.filter_filtered_df_col.to_csv(index=False)
+            csv_data_filtered = st.session_state.filter_filtered_df_col.to_csv(
+                index=False
+            )
             st.download_button(
                 label="Download Filtered (Kept) CSV",
                 data=csv_data_filtered,
                 file_name="filtered_output_per_column.csv",
                 mime="text/csv",
-                key="download_kept_btn"
+                key="download_kept_btn",
             )
 
             # Download EXCLUDED rows
-            csv_data_excluded = st.session_state.filter_excluded_df_col.to_csv(index=False)
+            csv_data_excluded = st.session_state.filter_excluded_df_col.to_csv(
+                index=False
+            )
             st.download_button(
                 label="Download Excluded (Removed) CSV",
                 data=csv_data_excluded,
                 file_name="excluded_output_per_column.csv",
                 mime="text/csv",
-                key="download_excluded_btn"
+                key="download_excluded_btn",
             )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Back", key="filter_back_button_step7"):  # Added key
+                st.session_state.filter_step = 6
+                st.rerun()
+        with col2:
+            if st.button("Reset Filter", key="filter_reset_button_step7"):  # Reset button
+                reset_filter_parameters()
+                st.session_state.filter_step = 1  # Go back to step 1 after reset. Change if different reset behaviour is needed
+                st.rerun()
         if st.button("Start Over", key="filter_start_over_button_step8"): # Added key
+            reset_filter_parameters()
             st.session_state.filter_step = 1
+            st.session_state.step1_initialized = False # Reset step 1 initialization flag
             st.rerun()
 
 
@@ -673,7 +739,7 @@ def login_signup_page():
         """
         <style>
          /* --- Login/Signup Button Styling - Kept from Iteration 4/5 (Pinker Colors & Size) --- */
-        div.stButton > button:first-child, 
+        div.stButton > button:first-child,
         div.stButton > button:nth-of-type(2) {
             background: linear-gradient(to right, #F770B7, #D546A2); /* Pinker Wyspur Gradient */
             color: white;
@@ -697,7 +763,7 @@ def login_signup_page():
         div.stButton > button:nth-of-type(2):hover {
             background: linear-gradient(to right, #FF99CC, #F066B3); /* Lighter pink hover gradient */
         }
-        
+
         /* Center almost everything inside a 'centered' container */
         .centered {
             display: flex;
@@ -714,7 +780,7 @@ def login_signup_page():
     # Create an overall empty container so we can control layout
     placeholder = st.empty()
     with placeholder.container():
-        
+
         # Use three columns and drop the content into the middle column
         # so that the logo and title appear centered.
         top_col1, top_col2, top_col3 = st.columns([1,2,1])
@@ -726,15 +792,15 @@ def login_signup_page():
             email = st.text_input("Email")
             password = st.text_input("Password", type="password")
         # If you also want the text inputs centered, just reuse a centered block
-        
 
-        # Now split the bottom portion into columns so that 
+
+        # Now split the bottom portion into columns so that
         # Login is on the left and Sign Up is on the right.
         bottom_col1, _, bottom_col2 = st.columns([1,2,1])  # middle column is just spacer
         with _:
             login_button = st.button("Login", key="login_button_login_page")
-        #with bottom_col2:
-            #signup_button = st.button("Sign Up", key="signup_button_signup_page")
+        # with bottom_col2:
+        #     signup_button = st.button("Sign Up", key="signup_button_signup_page")
 
         # Then handle authentication logic, etc.
         if login_button:
@@ -745,7 +811,7 @@ def login_signup_page():
                 st.session_state.auth_failed = False
                 st.rerun()
 
-        #elif signup_button:
+        # elif signup_button:
         #    response = signup_supabase(email, password)
         #    if response:
         #        st.success("Signup successful! Check your email to verify your account.")
@@ -757,12 +823,12 @@ fake_display = st.empty
 
 
 def main():
-    
+
     st.markdown(
         """
         <style>
          /* --- Login/Signup Button Styling - Kept from Iteration 4/5 (Pinker Colors & Size) --- */
-        div.stButton > button:first-child, 
+        div.stButton > button:first-child,
         div.stButton > button:nth-of-type(2) {
             background: linear-gradient(to right, #F770B7, #D546A2); /* Pinker Wyspur Gradient */
             color: white;
@@ -786,7 +852,7 @@ def main():
         div.stButton > button:nth-of-type(2):hover {
             background: linear-gradient(to right, #FF99CC, #F066B3); /* Lighter pink hover gradient */
         }
-        
+
         /* Center almost everything inside a 'centered' container */
         .centered {
             display: flex;
@@ -799,7 +865,7 @@ def main():
         """,
         unsafe_allow_html=True
     )
-    
+
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
         st.session_state.auth_failed = False
@@ -808,12 +874,11 @@ def main():
         login_signup_page()
     else:
 
-        
 
         # Initialize which page to show
         if "show_filter_tool" not in st.session_state:
             st.session_state.show_filter_tool = True
-       
+
 
         # Inject CSS to center sidebar content
         st.markdown(
@@ -834,6 +899,7 @@ def main():
             if st.button("AI CSV FILTER ", key="sidebar_filter_tool_button"): # Added key
                 st.session_state.show_filter_tool = True
                 st.session_state.pop('filter_step', None) # Reset filter steps
+                st.session_state.step1_initialized = False # Reset step 1 initialization when going back to filter tool
 
 
             # Display user info and logout button (only when logged in)
@@ -848,15 +914,15 @@ def main():
                 st.rerun()
 
         tab_names = ["CSV Filter", "Saved Filters", "Filter History"]
-        tab1, tab2, tab3 = st.tabs(tab_names) 
+        tab1, tab2, tab3 = st.tabs(tab_names)
 
-        with tab1: 
+        with tab1:
             filter_tool()
         with tab2:
             saved_filters_tab_content()
-        with tab3: 
+        with tab3:
             filter_history_tab_content()
-       
+
 
 def filter_history_tab_content():
     """Content for the Filter History tab."""
@@ -902,7 +968,7 @@ def saved_filters_tab_content():
                         # Load filter_data['filter_parameters'] and populate UI
                         filter_params = json.loads(filter_data['filter_parameters'])
                         apply_saved_filter_to_ui(filter_params) # Function to apply to UI (see next step)
-                        
+
                 with col3:
                     if st.button("Delete", key=f"delete_filter_button_{filter_data['id']}"): # Added key - unique per filter
                         if delete_saved_filter_from_supabase(supabase, filter_data['id']):
@@ -916,35 +982,34 @@ def apply_saved_filter_to_ui(filter_params):
     """Applies saved filter parameters to the filter tool UI."""
     # Set session state variables to populate the filter tool UI
     st.session_state.filter_selected_columns = filter_params.get("selected_columns", [])
-    st.session_state.filter_column_keywords = filter_params.get("column_keywords", {})
-    st.session_state.filter_conceptual_slider = filter_params.get("conceptual_slider", 5) # Default if not in saved filter
-    st.session_state.filter_chunk_size = filter_params.get("chunk_size", 400) # Default if not in saved filter
-    st.session_state.filter_temperature = filter_params.get("temperature", 0.0) # Default if not in saved filter
-    st.session_state.filter_selected_model = filter_params.get("selected_model", DEFAULT_MODEL) # Default if not in saved filter
-    st.session_state.filter_apply_fuzzy = filter_params.get("apply_fuzzy", False) # Default if not in saved filter
-    st.session_state.filter_step = 3 # Go to the "Enter Filter Keywords" step after applying a saved filter
+    st.session_state.filter_column_config = filter_params.get("column_config", {}) # <--- NEW STRUCTURE - LOAD COLUMN CONFIG
+    st.session_state.filter_conceptual_slider = filter_params.get("conceptual_slider", 5)
+    st.session_state.filter_chunk_size = filter_params.get("chunk_size", 400)
+    st.session_state.filter_temperature = filter_params.get("temperature", 0.0)
+    st.session_state.filter_selected_model = filter_params.get("selected_model", DEFAULT_MODEL)
+    # st.session_state.filter_apply_fuzzy = filter_params.get("apply_fuzzy", False)
+    st.session_state.filter_step = 3 # Go to Step 3 after loading filter
+    st.session_state.show_filter_tool = True
+    st.info("Saved filter parameters applied! Go to the 'CSV Filter' tab to use them.")
 
-    # You might need to also set the text input values for keywords.
-    # Since the UI is built step by step, setting session state should trigger UI updates on rerun.
-    st.session_state.show_filter_tool = True # Ensure filter tool is shown if not already   
-    st.info("Saved filter parameters applied! Go to the 'CSV Filter' tab to use them.") # ADD SUCCESS MESSAGE
+    st.write("--- Loaded filter_params ---") # Debug print
+    st.json(filter_params) # Debug print - print filter_params as JSON for readability
+    st.write("--- Session State after apply_saved_filter_to_ui ---") # Debug print
+    st.json(st.session_state.to_dict()) # Debug print - print relevant parts of session state as JSON
 
 def reset_filter_parameters():
     """Resets all filter parameters in session state."""
     st.session_state.filter_selected_columns = []
-    st.session_state.filter_column_keywords = {}
-    st.session_state.filter_conceptual_slider = 5  # Reset to default value
-    st.session_state.filter_chunk_size = 400  # Reset to default value
-    st.session_state.filter_temperature = 0.0  # Reset to default value
-    st.session_state.filter_selected_model = DEFAULT_MODEL  # Reset to default model
-    st.session_state.filter_apply_fuzzy = False  # Reset to default value
-    # Reset any other filter-related session state variables
-
-    # If you're using the saved_filter_applied flag, reset it as well:
+    st.session_state.filter_column_config = {} # <--- NEW STRUCTURE - RESET COLUMN CONFIG
+    st.session_state.filter_conceptual_slider = 5
+    st.session_state.filter_chunk_size = 400
+    st.session_state.filter_temperature = 0.0
+    st.session_state.filter_selected_model = DEFAULT_MODEL
+    # st.session_state.filter_apply_fuzzy = False
+    st.session_state.step1_initialized = False
     st.session_state.saved_filter_applied = False
+    st.info("Filter parameters reset!")
 
-    st.info("Filter parameters reset!") # Confirmation message
-    
 
 
 if __name__ == "__main__":
